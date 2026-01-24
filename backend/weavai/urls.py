@@ -15,6 +15,7 @@ urlpatterns = [
         path('', include('weavai.apps.core.urls')),
         path('auth/', include('users.urls')),  # 사용자 인증 API
         path('jobs/', include('jobs.urls')),
+        path('chats/', include('chats.urls')),
         path('storage/', include('weavai.apps.storage.urls')),
     ])),
 

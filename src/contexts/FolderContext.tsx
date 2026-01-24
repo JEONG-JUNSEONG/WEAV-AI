@@ -1,12 +1,14 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Folder, ChatSession } from '../types';
 import { aiService } from '../services/aiService';
+import { chatApi } from '../services/chatApi';
 import { useAuth } from './AuthContext';
 import { toast } from 'sonner';
 
 // Helper functions for AI folder generation
-const generateWelcomeMessage = (step: any, projectName: string): string => {
-    const modelNames = {
+type StepLike = { title: string; modelId: string; systemInstruction: string };
+const generateWelcomeMessage = (step: StepLike, projectName: string): string => {
+    const modelNames: Record<string, string> = {
         'gpt-5.2-instant': 'ChatGPT 5.2 Instant',
         'gemini-3-flash': 'Gemini 3 Flash',
         'gpt-image-1.5': 'GPT Image 1.5',
@@ -14,7 +16,7 @@ const generateWelcomeMessage = (step: any, projectName: string): string => {
         'sora': 'SORA'
     };
 
-    const modelDescriptions = {
+    const modelDescriptions: Record<string, string> = {
         'gpt-5.2-instant': '빠르고 효율적인 텍스트 생성에 특화된 모델로, 전략 수립과 계획 수립에 최적화되어 있습니다.',
         'gemini-3-flash': '데이터 분석과 종합적인 판단력이 뛰어난 모델로, 종목 선정과 세부 계획 수립에 강점이 있습니다.',
         'gpt-image-1.5': '고품질 이미지 생성에 특화된 DALL-E 모델입니다.',
@@ -22,11 +24,10 @@ const generateWelcomeMessage = (step: any, projectName: string): string => {
         'sora': '혁신적인 동영상 생성 AI로, 창의적인 비디오 콘텐츠 제작에 최적화되어 있습니다.'
     };
 
-    // 프로젝트 전체 단계 수 확인 (이 함수에서는 사용할 수 없으므로 기본 메시지만 생성)
     const baseMessage = `🎯 **${projectName}** 프로젝트의 **${step.title}** 단계에 오신 것을 환영합니다!
 
-🤖 **사용 모델:** ${modelNames[step.modelId] || step.modelId}
-📝 **모델 특징:** ${modelDescriptions[step.modelId] || '범용 AI 모델입니다.'}
+🤖 **사용 모델:** ${modelNames[step.modelId] ?? step.modelId}
+📝 **모델 특징:** ${modelDescriptions[step.modelId] ?? '범용 AI 모델입니다.'}
 
 💡 **작업 개요:**
 ${step.systemInstruction}
@@ -123,7 +124,7 @@ const generateRecommendedPrompts = (step: any, projectName: string): string[] =>
 interface FolderContextType {
     folders: Folder[];
     folderChats: Record<string, ChatSession[]>;
-    createFolder: (name: string, type: 'custom') => void;
+    createFolder: (name: string, type: 'custom') => void | Promise<void>;
     createAIFolder: (goal: string) => Promise<void>;
     deleteFolder: (folderId: string) => void;
     addChatToFolder: (folderId: string, chat: ChatSession) => void;
@@ -132,196 +133,117 @@ interface FolderContextType {
     isGeneratingFolder: boolean;
 }
 
-// Data cleanup utilities
-const cleanupOldChatData = (folderChats: Record<string, ChatSession[]>) => {
-    const cleaned = { ...folderChats };
-    const now = Date.now();
-    const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000); // 30일 전
-
-    Object.keys(cleaned).forEach(folderId => {
-        cleaned[folderId] = cleaned[folderId]
-            .filter(chat => chat.lastModified > thirtyDaysAgo) // 30일 이상된 채팅 제거
-            .map(chat => ({
-                ...chat,
-                messages: chat.messages
-                    .filter(msg => msg.timestamp > thirtyDaysAgo) // 오래된 메시지 제거
-                    .slice(-50) // 채팅당 최대 50개 메시지만 유지
-            }))
-            .filter(chat => chat.messages.length > 0); // 빈 채팅 제거
-    });
-
-    return cleaned;
-};
-
-const aggressiveCleanup = (folderChats: Record<string, ChatSession[]>) => {
-    const cleaned = { ...folderChats };
-    const now = Date.now();
-    const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000); // 7일 전
-
-    Object.keys(cleaned).forEach(folderId => {
-        cleaned[folderId] = cleaned[folderId]
-            .filter(chat => chat.lastModified > sevenDaysAgo) // 7일 이상된 채팅 제거
-            .map(chat => ({
-                ...chat,
-                messages: chat.messages
-                    .filter(msg => msg.timestamp > sevenDaysAgo) // 오래된 메시지 제거
-                    .slice(-20) // 채팅당 최대 20개 메시지만 유지
-                    .map(msg => ({
-                        ...msg,
-                        content: msg.content.length > 500 ? msg.content.substring(0, 500) + '...' : msg.content
-                    })) // 긴 메시지 축약
-            }))
-            .filter(chat => chat.messages.length > 0); // 빈 채팅 제거
-    });
-
-    return cleaned;
-};
-
 const FolderContext = createContext<FolderContextType | null>(null);
 
 export const FolderProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { user } = useAuth(); // Auth Integration
-    // 사용자별로 데이터 분리
-    const [folders, setFolders] = useState<Folder[]>(() => {
-        if (!user) return [];
-        const saved = localStorage.getItem(`weav_folders_${user.uid}`);
-        return saved ? JSON.parse(saved) : [];
-    });
-
-    const [folderChats, setFolderChats] = useState<Record<string, ChatSession[]>>(() => {
-        if (!user) return {};
-        const saved = localStorage.getItem(`weav_folder_chats_${user.uid}`);
-        return saved ? JSON.parse(saved) : {};
-    });
-
+    const { user } = useAuth();
+    const [folders, setFolders] = useState<Folder[]>([]);
+    const [folderChats, setFolderChats] = useState<Record<string, ChatSession[]>>({});
     const [isGeneratingFolder, setIsGeneratingFolder] = useState(false);
+    const persistTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-    // Persistence with error handling (사용자별로 분리)
+    // DB에서 폴더/폴더별 채팅 로드 (로그인 시)
     useEffect(() => {
+        if (!user) {
+            setFolders([]);
+            setFolderChats({});
+            return;
+        }
+        let ok = true;
+        (async () => {
+            try {
+                const flist = await chatApi.getFolders();
+                if (!ok) return;
+                setFolders(flist);
+                const byFolder: Record<string, ChatSession[]> = {};
+                await Promise.all(
+                    flist.map(async (f) => {
+                        const chats = await chatApi.getChats(f.id);
+                        if (!ok) return;
+                        byFolder[f.id] = chats;
+                    })
+                );
+                if (ok) setFolderChats(byFolder);
+            } catch (e) {
+                console.error('Failed to load folders/chats:', e);
+                toast.error('폴더·채팅 목록을 불러오지 못했습니다.');
+            }
+        })();
+        return () => { ok = false; };
+    }, [user?.uid]);
+
+    const createFolder = async (name: string, type: 'custom') => {
         if (!user) return;
         try {
-            localStorage.setItem(`weav_folders_${user.uid}`, JSON.stringify(folders));
-        } catch (error) {
-            console.warn('Failed to save folders to localStorage:', error);
+            const f = await chatApi.createFolder(name, type);
+            setFolders(prev => [f, ...prev]);
+            setFolderChats(prev => ({ ...prev, [f.id]: [] }));
+            toast.success(`'${name}' 폴더가 생성되었습니다.`);
+        } catch (e: any) {
+            toast.error(e?.message || '폴더 생성에 실패했습니다.');
         }
-    }, [folders, user]);
-
-    useEffect(() => {
-        if (!user) return;
-        try {
-            // 데이터 크기 확인 및 정리
-            const dataToSave = cleanupOldChatData(folderChats);
-            const dataString = JSON.stringify(dataToSave);
-            const storageKey = `weav_folder_chats_${user.uid}`;
-
-            // 데이터가 너무 크면 압축 시도 또는 경고
-            if (dataString.length > 2 * 1024 * 1024) { // 2MB 초과
-                console.warn('Chat data is too large, cleaning up old data...');
-                const cleanedData = aggressiveCleanup(folderChats);
-                localStorage.setItem(storageKey, JSON.stringify(cleanedData));
-            } else {
-                localStorage.setItem(storageKey, dataString);
-            }
-        } catch (error) {
-            console.error('Failed to save folder chats to localStorage:', error);
-            // 용량 초과 시 오래된 데이터 정리 후 재시도
-            if (error instanceof Error && error.name === 'QuotaExceededError') {
-                try {
-                    console.warn('Storage quota exceeded, cleaning up old data...');
-                    const cleanedData = aggressiveCleanup(folderChats);
-                    const storageKey = `weav_folder_chats_${user.uid}`;
-                    localStorage.setItem(storageKey, JSON.stringify(cleanedData));
-                } catch (retryError) {
-                    console.error('Failed to save even after cleanup:', retryError);
-                    // 최후의 수단: 데이터를 초기화
-                    if (user) {
-                        localStorage.removeItem(`weav_folder_chats_${user.uid}`);
-                    }
-                    alert('브라우저 저장 공간이 부족합니다. 일부 채팅 기록이 삭제되었습니다.');
-                }
-            }
-        }
-    }, [folderChats]);
-
-    const createFolder = (name: string, type: 'custom') => {
-        const newFolder: Folder = {
-            id: Date.now().toString(),
-            name,
-            type,
-            createdAt: Date.now()
-        };
-        setFolders(prev => [newFolder, ...prev]);
-        setFolderChats(prev => ({ ...prev, [newFolder.id]: [] }));
-        toast.success(`'${name}' 폴더가 생성되었습니다.`);
     };
 
     const createAIFolder = async (goal: string) => {
-        console.log("createAIFolder 함수 호출됨, goal:", goal);
+        if (!user) return;
         setIsGeneratingFolder(true);
         try {
-            // Pass user for Access Control
             const plan = await aiService.planProjectStructure(goal, user);
-            const newFolder: Folder = {
-                id: Date.now().toString(),
-                name: plan.projectName,
-                type: 'shorts-workflow',
-                createdAt: Date.now()
-            };
+            const f = await chatApi.createFolder(plan.projectName, 'shorts-workflow');
+            const chats: ChatSession[] = [];
 
-            const chats: ChatSession[] = plan.steps.map((step, index) => {
-                // 다음 단계 정보를 포함한 system instruction 생성
-                let enhancedSystemInstruction = step.systemInstruction;
-
-                if (index < plan.steps.length - 1) {
-                    // 마지막 단계가 아닌 경우 다음 단계 정보를 추가
-                    const nextStep = plan.steps[index + 1];
-                    enhancedSystemInstruction += `\n\n📋 다음 단계 안내: 이 프로젝트는 총 ${plan.steps.length}단계로 구성되어 있으며, 다음 단계는 "${nextStep.title}"입니다. 현재 단계의 결과를 다음 단계에서 최대한 활용할 수 있도록 체계적이고 구체적인 답변을 제공해주세요.`;
+            for (let i = 0; i < plan.steps.length; i++) {
+                const step = plan.steps[i];
+                if (!step) continue;
+                let si = step.systemInstruction;
+                if (i < plan.steps.length - 1) {
+                    const next = plan.steps[i + 1];
+                    si += `\n\n📋 다음 단계 안내: 이 프로젝트는 총 ${plan.steps.length}단계로 구성되어 있으며, 다음 단계는 "${next?.title ?? ''}"입니다. 현재 단계의 결과를 다음 단계에서 최대한 활용할 수 있도록 체계적이고 구체적인 답변을 제공해주세요.`;
                 } else {
-                    // 마지막 단계인 경우
-                    enhancedSystemInstruction += `\n\n🎯 최종 단계: 이 프로젝트의 마지막 단계입니다. 지금까지의 모든 단계를 종합하여 완성도 높은 최종 결과를 제시해주세요.`;
+                    si += `\n\n🎯 최종 단계: 이 프로젝트의 마지막 단계입니다. 지금까지의 모든 단계를 종합하여 완성도 높은 최종 결과를 제시해주세요.`;
                 }
-
-                return {
-                    id: `${newFolder.id}-step${index + 1}`,
-                    title: step.title,
-                    messages: [{
-                        id: `welcome-${newFolder.id}-step${index + 1}`,
-                        role: 'model',
-                        content: generateWelcomeMessage(step, plan.projectName),
-                        type: 'text',
-                        timestamp: Date.now()
-                    }],
-                    modelId: step.modelId,
-                    systemInstruction: enhancedSystemInstruction,
-                    folderId: newFolder.id,
-                    lastModified: Date.now(),
-                    recommendedPrompts: generateRecommendedPrompts(step, plan.projectName)
+                const welcomeMsg = {
+                    id: `welcome-${f.id}-step${i + 1}`,
+                    role: 'model' as const,
+                    content: generateWelcomeMessage(step, plan.projectName),
+                    type: 'text' as const,
+                    timestamp: Date.now()
                 };
-            });
+                const c = await chatApi.createChat({
+                    title: step.title,
+                    folder_id: f.id,
+                    messages: [welcomeMsg],
+                    model_id: step.modelId,
+                    system_instruction: si,
+                    recommended_prompts: generateRecommendedPrompts(step, plan.projectName)
+                });
+                chats.push({ ...c, folderId: f.id });
+            }
 
-            console.log("새 폴더 생성됨:", newFolder.name, "ID:", newFolder.id);
-            setFolders(prev => [newFolder, ...prev]);
-            setFolderChats(prev => ({ ...prev, [newFolder.id]: chats }));
-            toast.success("AI 프로젝트가 성공적으로 설계되었습니다.");
-        } catch (error: any) {
-            console.error("Failed to generate AI folder", error);
-            const errorMessage = error.message === "로그인이 필요한 기능입니다."
-                ? "로그인 후 이용 가능한 기능입니다."
-                : "AI 프로젝트 설계 중 오류가 발생했습니다.";
-            toast.error(errorMessage);
+            setFolders(prev => [f, ...prev]);
+            setFolderChats(prev => ({ ...prev, [f.id]: chats }));
+            toast.success('AI 프로젝트가 성공적으로 설계되었습니다.');
+        } catch (e: any) {
+            const msg = e?.message === '로그인이 필요한 기능입니다.' ? '로그인 후 이용 가능한 기능입니다.' : (e?.message || 'AI 프로젝트 설계 중 오류가 발생했습니다.');
+            toast.error(msg);
         } finally {
             setIsGeneratingFolder(false);
         }
     };
 
-    const deleteFolder = (folderId: string) => {
-        setFolders(prev => prev.filter(f => f.id !== folderId));
-        setFolderChats(prev => {
-            const newState = { ...prev };
-            delete newState[folderId];
-            return newState;
-        });
-        toast.info("폴더가 삭제되었습니다.");
+    const deleteFolder = async (folderId: string) => {
+        try {
+            await chatApi.deleteFolder(folderId);
+            setFolders(prev => prev.filter(f => f.id !== folderId));
+            setFolderChats(prev => {
+                const next = { ...prev };
+                delete next[folderId];
+                return next;
+            });
+            toast.info('폴더가 삭제되었습니다.');
+        } catch (e: any) {
+            toast.error(e?.message || '폴더 삭제에 실패했습니다.');
+        }
     };
 
     const addChatToFolder = (folderId: string, chat: ChatSession) => {
@@ -331,19 +253,38 @@ export const FolderProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }));
     };
 
-    const removeChatFromFolder = (folderId: string, chatId: string) => {
-        setFolderChats(prev => ({
-            ...prev,
-            [folderId]: (prev[folderId] || []).filter(c => c.id !== chatId)
-        }));
+    const removeChatFromFolder = async (folderId: string, chatId: string) => {
+        try {
+            await chatApi.deleteChat(chatId);
+            setFolderChats(prev => ({
+                ...prev,
+                [folderId]: (prev[folderId] || []).filter(c => c.id !== chatId)
+            }));
+        } catch (e: any) {
+            toast.error(e?.message || '채팅 삭제에 실패했습니다.');
+        }
     };
 
     const updateFolderChat = (folderId: string, chatId: string, updates: Partial<ChatSession>) => {
         setFolderChats(prev => {
-            const currentChats = prev[folderId] || [];
-            const updatedChats = currentChats.map(c => c.id === chatId ? { ...c, ...updates } : c);
-            return { ...prev, [folderId]: updatedChats };
+            const list = prev[folderId] || [];
+            const updated = list.map(c => c.id === chatId ? { ...c, ...updates } : c);
+            return { ...prev, [folderId]: updated };
         });
+        const payload: Parameters<typeof chatApi.updateChat>[1] = {};
+        if (updates.messages != null) payload.messages = updates.messages as any;
+        if (updates.modelId != null) payload.model_id = updates.modelId;
+        if (updates.systemInstruction != null) payload.system_instruction = updates.systemInstruction;
+        const key = chatId;
+        if (persistTimeoutRef.current[key]) clearTimeout(persistTimeoutRef.current[key]);
+        persistTimeoutRef.current[key] = setTimeout(async () => {
+            delete persistTimeoutRef.current[key];
+            try {
+                await chatApi.updateChat(chatId, payload);
+            } catch (e) {
+                console.warn('Failed to persist folder chat update:', e);
+            }
+        }, 1500);
     };
 
     return (

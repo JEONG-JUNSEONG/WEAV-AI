@@ -209,6 +209,9 @@ MINIO_ROOT_PASSWORD=<강력한-비밀번호>
 
 # PostgreSQL
 POSTGRES_PASSWORD=<강력한-비밀번호>
+
+# Redis (API·Worker 공통)
+REDIS_URL=redis://redis:6379/0
 ```
 
 ---
@@ -254,4 +257,4 @@ cat ~/.cloudflared/config.yml
 
 ---
 
-**마지막 업데이트**: 2026-01-24
+**마지막 업데이트**: 2026-01-24 (문서 통일)

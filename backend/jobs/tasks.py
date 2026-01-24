@@ -11,6 +11,79 @@ from weavai.apps.storage.s3 import S3Storage
 logger = logging.getLogger(__name__)
 
 
+# ===== AI 작업 비동기 처리 =====
+
+MAX_CONCURRENT_JOBS_PER_USER = 4
+
+
+@shared_task(bind=True, max_retries=3)
+def run_ai_job(self, job_id: str) -> None:
+    """
+    AI 작업 실행 Celery 태스크.
+    Job을 IN_PROGRESS로 두고 ai_router로 실제 호출 후, 결과를 Job/Artifact에 반영.
+    """
+    from weavai.apps.ai.router import ai_router
+    from weavai.apps.ai.errors import AIProviderError, AIRequestError, AIQuotaExceededError
+
+    try:
+        job = Job.objects.get(id=job_id)
+    except Job.DoesNotExist:
+        logger.error(f"Job not found: {job_id}")
+        return
+
+    if job.status not in ('PENDING', 'IN_QUEUE'):
+        logger.warning(f"Job {job_id} already processed (status={job.status})")
+        return
+
+    job.status = 'IN_PROGRESS'
+    job.save(update_fields=['status', 'updated_at'])
+
+    model_id = (job.model_id or '').lower()
+    if 'image' in model_id or 'dall-e' in model_id or 'gpt-image' in model_id:
+        model_type = 'image'
+    elif 'video' in model_id or 'sora' in model_id or 'veo' in model_id:
+        model_type = 'video'
+    else:
+        model_type = 'text'
+
+    try:
+        ai_result = ai_router.route_and_run(
+            provider=job.provider,
+            model_type=model_type,
+            arguments=job.arguments or {}
+        )
+    except (AIProviderError, AIRequestError, AIQuotaExceededError) as e:
+        job.status = 'FAILED'
+        job.error = str(e)
+        job.save(update_fields=['status', 'error', 'updated_at'])
+        logger.error(f"AI job failed: {job_id} - {e}")
+        return
+    except Exception as e:
+        job.status = 'FAILED'
+        job.error = str(e)
+        job.save(update_fields=['status', 'error', 'updated_at'])
+        logger.exception(f"AI job error: {job_id}")
+        return
+
+    job.status = 'COMPLETED'
+    job.result_json = ai_result
+    job.save(update_fields=['status', 'result_json', 'updated_at'])
+
+    if ai_result.get('text'):
+        Artifact.objects.create(job=job, kind='text', text_content=ai_result['text'])
+    elif ai_result.get('url'):
+        kind = 'image' if model_type == 'image' else 'video' if model_type == 'video' else 'file'
+        Artifact.objects.create(
+            job=job,
+            kind=kind,
+            s3_key=ai_result.get('url'),
+            presigned_url=ai_result['url'],
+            mime_type=ai_result.get('mime_type') or ('image/png' if kind == 'image' else 'video/mp4'),
+            size_bytes=ai_result.get('size_bytes')
+        )
+    logger.info(f"AI job completed: {job_id}")
+
+
 # ===== AI 작업 관련 Celery 작업들 - 추후 구현 예정 =====
 # 현재는 모두 주석 처리되어 있음
 # 추후 AI 서비스(OpenAI, Gemini 등) 연동 시 활성화 예정

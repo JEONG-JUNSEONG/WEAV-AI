@@ -53,7 +53,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    // 디버깅용 렌더링 확인
     return (
         <>
             <main className="flex-1 w-full max-w-5xl mx-auto flex flex-col relative z-10">
@@ -67,39 +66,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <div ref={messagesEndRef} />
                     </div>
                 )}
-
-            </main>
-
-            <ChatInput
-                inputValue={inputValue}
-                onInputChange={setInputValue}
-                onSend={() => sendMessage()}
-                onStop={isLoading ? stopGeneration : undefined}
-                isLoading={isLoading}
-                selectedModel={selectedModel}
-                onModelSelect={setSelectedModel}
-                hasStarted={hasStarted}
-                widthStyle={contentStyle}
-                prompts={allPrompts}
-                videoOptions={videoOptions}
-                onVideoOptionsChange={setVideoOptions}
-                recommendedPrompts={hasStarted && messages.length === 1 ? currentSession?.recommendedPrompts : undefined}
-                showRecommendedPrompts={hasStarted && messages.length === 1 && showPrompts && !!currentSession?.recommendedPrompts}
-                onCloseRecommendedPrompts={() => setShowPrompts(false)}
-            />
-        </>
-    );
-
-    return (
-        <>
-            <main className="flex-1 w-full max-w-5xl mx-auto flex flex-col relative z-10">
-                <div className={`flex-1 overflow-y-auto px-4 pt-20 pb-40 custom-scrollbar transition-opacity duration-1000 ${hasStarted ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                    {messages.map((msg) => (
-                        <ChatMessage key={msg.id} message={msg} />
-                    ))}
-                    <div ref={messagesEndRef} />
-                </div>
-
             </main>
 
             <ChatInput

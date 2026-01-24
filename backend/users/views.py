@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.utils import timezone
 
 # Firebase Admin SDK (설치 필요: pip install firebase-admin)
 try:
@@ -97,6 +98,7 @@ def verify_firebase_token(request):
             defaults={
                 'email': email or '',
                 'first_name': display_name or '',
+                'membership_type': 'free',  # 기본값: 무료
             }
         )
         
@@ -105,6 +107,9 @@ def verify_firebase_token(request):
             user.email = email
         if display_name:
             user.first_name = display_name
+        if photo_url:
+            user.photo_url = photo_url
+        user.last_login_at = timezone.now()
         user.save()
         
         # JWT 토큰 생성
@@ -120,6 +125,12 @@ def verify_firebase_token(request):
                 'email': email,
                 'display_name': display_name,
                 'photo_url': photo_url,
+                'membership_type': user.membership_type,
+                'membership_expires_at': user.membership_expires_at.isoformat() if user.membership_expires_at else None,
+                'is_membership_active': user.is_membership_active,
+                'can_use_premium_features': user.can_use_premium_features,
+                'has_openai_key': user.has_openai_key,
+                'has_gemini_key': user.has_gemini_key,
             }
         }, status=status.HTTP_200_OK)
         
@@ -154,6 +165,12 @@ def user_profile(request):
             'first_name': request.user.first_name,
             'last_name': request.user.last_name,
             'date_joined': request.user.date_joined,
+            'membership_type': request.user.membership_type,
+            'membership_expires_at': request.user.membership_expires_at.isoformat() if request.user.membership_expires_at else None,
+            'is_membership_active': request.user.is_membership_active,
+            'can_use_premium_features': request.user.can_use_premium_features,
+            'has_openai_key': request.user.has_openai_key,
+            'has_gemini_key': request.user.has_gemini_key,
         }, status=status.HTTP_200_OK)
     
     elif request.method == 'PUT':

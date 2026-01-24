@@ -65,7 +65,8 @@ backend/.env
 # Docker volumes (local development)
 infra/.env
 
-# MinIO data (external drive)
+# MinIO data (external drive or local)
+infra/minio-data/
 # /Volumes/WEAVAI_2T/minio-data/  # Uncomment if using different path
 
 # Celery

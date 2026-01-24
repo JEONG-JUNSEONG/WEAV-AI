@@ -23,6 +23,9 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,testserver', cast=Csv())
 
+# 커스텀 User 모델
+AUTH_USER_MODEL = 'users.User'
+
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -45,6 +48,7 @@ INSTALLED_APPS = [
     'ai_services',
     'payments',
     'jobs',  # AI 작업 관리 (모델 포함)
+    'chats',  # 폴더/채팅 세션 (DB 저장)
 ]
 
 MIDDLEWARE = [
@@ -166,9 +170,20 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
 
+# Redis (Celery + Django cache 공용)
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+
+# Django cache - Redis 사용 (헬스체크·세션 등, Gunicorn 멀티워커 대응)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': REDIS_URL,
+    }
+}
+
 # Celery Configuration
-CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

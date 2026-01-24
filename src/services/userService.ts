@@ -39,6 +39,11 @@ export const userService = {
             tokenManager.setAccessToken(data.access);
             tokenManager.setRefreshToken(data.refresh);
             
+            // 사용자 정보 저장 (멤버십 등)
+            if (data.user) {
+                localStorage.setItem('weav_user_info', JSON.stringify(data.user));
+            }
+            
             console.log('[UserService] JWT tokens issued successfully');
         } catch (error) {
             console.error('[UserService] Failed to verify Firebase token:', error);

@@ -93,15 +93,12 @@ const MainLayout: React.FC = () => {
           }}
         >
           <Routes>
+            <Route path="/login" element={<LoginView />} />
             <Route path="/" element={
-              <ProtectedRoute>
-                <ChatView hasStarted={hasStarted} contentStyle={contentStyle} allPrompts={allPrompts} />
-              </ProtectedRoute>
+              <ChatView hasStarted={hasStarted} contentStyle={contentStyle} allPrompts={allPrompts} />
             } />
             <Route path="/chat/:id" element={
-              <ProtectedRoute>
-                <ChatView hasStarted={hasStarted} contentStyle={contentStyle} allPrompts={allPrompts} />
-              </ProtectedRoute>
+              <ChatView hasStarted={hasStarted} contentStyle={contentStyle} allPrompts={allPrompts} />
             } />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

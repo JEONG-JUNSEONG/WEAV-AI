@@ -42,10 +42,10 @@ class ImageGenerationRequest(BaseModel):
 
 
 class VideoGenerationRequest(BaseModel):
-    """비디오 생성 요청 스키마 (추후 구현)"""
+    """비디오 생성 요청 스키마"""
 
     prompt: str = Field(..., min_length=1, max_length=1000)
-    duration: Optional[str] = Field("5s", pattern=r'^\d+s$')
+    duration: Optional[str] = Field("8s", pattern=r'^\d+s$')
     resolution: Optional[str] = Field("720p", pattern=r'^(720p|1080p|4K)$')
-    aspect_ratio: Optional[str] = Field("16:9", pattern=r'^(16:9|9:16|1:1)$')
-    style: Optional[str] = Field("realistic", pattern=r'^(realistic|cinematic|animated)$')
+    aspect_ratio: Optional[str] = Field("16:9", pattern=r'^(16:9|9:16|1:1|3:4)$')
+    style: Optional[str] = Field("realistic", pattern=r'^(realistic|cinematic|animated|cartoon|anime)$')

@@ -25,10 +25,12 @@
 ### 핵심 기능
 - 🤖 **AI 기반 프로젝트 계획**: 사용자 목표를 분석하여 단계별 작업 계획 생성
 - 💬 **멀티 모델 채팅**: OpenAI GPT, Google Gemini 등 다양한 AI 모델 지원
-- 🎨 **이미지 생성**: DALL-E 3를 통한 고품질 이미지 생성
-- 🎬 **비디오 생성**: SORA, VEO를 통한 동영상 생성 (준비 중)
-- 📁 **폴더 기반 관리**: 프로젝트별 채팅방 및 생성물 관리
+- 🎨 **이미지 생성**: DALL-E 3 (비동기 Jobs API)
+- 🎬 **비디오 생성**: SORA, VEO (비동기 Jobs API)
+- 📁 **폴더·채팅 DB 저장**: 로그인 후 작업 내용 DB 유지, 로그아웃·재로그인 시 복원
 - 🎨 **다크/라이트 모드**: 사용자 맞춤형 테마 지원
+- 🔐 **사용자·멤버십 DB**: 로그인 시 User 저장, 멤버십( free/standard/premium ) 확인
+- 👀 **비로그인 둘러보기**: 화면 공개, 기능 사용 시 로그인/멤버십 유도 모달
 
 ---
 
@@ -86,9 +88,9 @@
    - 인증/인가
 
 3. **데이터베이스 (PostgreSQL)**
-   - 사용자 데이터
-   - 채팅 세션
-   - 작업 히스토리
+   - **User** (커스텀, 멤버십·API 키 상태)
+   - **Folder / ChatSession** (chats 앱, 사용자별)
+   - **Job / Artifact** (jobs 앱, 사용자 연결)
    - 생성물 메타데이터
 
 4. **캐시/큐 (Redis)**
@@ -96,9 +98,9 @@
    - Celery 작업 큐
 
 5. **비동기 작업 (Celery)**
-   - AI 생성 작업 처리
-   - 파일 업로드/다운로드
-   - 배치 작업
+   - AI 이미지/비디오 생성 (Jobs API 연동)
+   - **사용자당 최대 4건 동시 처리**, 초과 시 429
+   - 파일 업로드/다운로드, 배치 작업
 
 6. **파일 저장소 (MinIO)**
    - 생성된 이미지/비디오 저장
@@ -249,20 +251,23 @@ WEAV-AI/
 │
 ├── src/                        # React 프론트엔드
 │   ├── components/            # React 컴포넌트
-│   │   ├── auth/              # 인증 관련
+│   │   ├── auth/              # 인증 (LoginView, ProtectedRoute)
 │   │   ├── chat/              # 채팅 UI
 │   │   ├── gallery/           # 미디어 갤러리
 │   │   ├── layout/            # 레이아웃
+│   │   ├── membership/        # 멤버십 유도 모달
 │   │   ├── settings/          # 설정 모달
 │   │   └── ui/                # UI 컴포넌트
 │   ├── contexts/              # React Context
-│   │   ├── AuthContext.tsx    # 인증 상태
-│   │   ├── ChatContext.tsx    # 채팅 상태
-│   │   ├── FolderContext.tsx  # 폴더 관리
-│   │   └── ThemeContext.tsx    # 테마 관리
+│   │   ├── AuthContext.tsx    # 인증·userInfo(멤버십)
+│   │   ├── ChatContext.tsx    # 채팅 (chatApi 연동)
+│   │   ├── FolderContext.tsx  # 폴더 (chatApi 연동)
+│   │   └── ThemeContext.tsx   # 테마
 │   ├── services/              # API 서비스
-│   │   ├── aiService.ts       # AI 서비스 호출 (백엔드 프록시)
-│   │   ├── userService.ts     # 사용자 API
+│   │   ├── aiService.ts       # AI (Jobs 비동기+폴링)
+│   │   ├── apiClient.ts       # JWT·API 공통
+│   │   ├── chatApi.ts         # 채팅·폴더 API
+│   │   ├── userService.ts     # 사용자·JWT
 │   │   └── firebase.ts        # Firebase 인증
 │   ├── hooks/                 # 커스텀 훅
 │   ├── constants/             # 상수 정의
@@ -388,8 +393,10 @@ docker compose up -d
 ### 4. 데이터베이스 마이그레이션
 
 ```bash
-docker compose exec api python manage.py migrate
+cd infra
+docker compose run --rm --entrypoint "" api python manage.py migrate
 ```
+> API 컨테이너 기본 entrypoint가 Gunicorn이므로, 마이그레이션 시 `--entrypoint ""`로 override.
 
 ### 5. 프론트엔드 실행
 
@@ -619,15 +626,30 @@ Content-Type: application/json
 - 레거시 Python SDK는 deprecated/아카이브되었으므로 사용하지 않습니다.
 - 공식 문서: [python-genai 문서](https://googleapis.github.io/python-genai/)
 
-### 작업 조회
+### 작업 조회 (폴링용)
 ```http
 GET /api/v1/jobs/{job_id}/
+Authorization: Bearer <JWT>
+```
+- `status`: `IN_QUEUE` | `IN_PROGRESS` | `COMPLETED` | `FAILED`
+- `COMPLETED` 시 `result` (type, url/text 등) 포함
+
+### 작업 목록 (사용자별)
+```http
+GET /api/v1/jobs/
+Authorization: Bearer <JWT>
 ```
 
-### 작업 목록
-```http
-GET /api/v1/jobs/?status=COMPLETED&provider=openai
-```
+### 채팅·폴더 (인증 필수)
+- `GET/POST /api/v1/chats/folders/` - 폴더 목록/생성
+- `GET/PUT/DELETE /api/v1/chats/folders/<uuid>/` - 폴더 상세
+- `GET /api/v1/chats/chats/?folder=<uuid>` - 채팅 목록 (폴더별 또는 최근)
+- `POST /api/v1/chats/chats/` - 채팅 생성
+- `GET/PUT/DELETE /api/v1/chats/chats/<uuid>/` - 채팅 상세
+
+### 인증
+- `POST /api/v1/auth/verify-firebase-token/` - Firebase 토큰 검증, JWT 발급, **User·멤버십 DB 저장**
+- `GET /api/v1/auth/profile/` - 프로필·멤버십 조회
 
 ---
 
@@ -673,37 +695,24 @@ AI 생성 결과:
 
 ## 🗄️ 데이터베이스 구조
 
-### Job 모델
-AI 생성 작업을 추적하는 메인 모델
+### User 모델 (커스텀, `users.User`, `AUTH_USER_MODEL`)
+- `username`: Firebase UID
+- `email`, `first_name`, `last_name`, `photo_url`
+- **멤버십**: `membership_type` (free/standard/premium), `membership_expires_at`
+- **API 키 상태**: `has_openai_key`, `has_gemini_key`
+- `last_login_at`
+- `is_membership_active`, `can_use_premium_features` (property)
 
-```python
-class Job(models.Model):
-    id = UUIDField(primary_key=True)
-    status = CharField(choices=STATUS_CHOICES)  # PENDING, COMPLETED, FAILED 등
-    provider = CharField(choices=PROVIDER_CHOICES)  # openai, gemini, fal
-    model_id = CharField()  # gpt-4o-mini, gemini-1.5-flash 등
-    arguments = JSONField()  # API 호출 파라미터
-    result_json = JSONField()  # AI 응답 결과 (Responses API 형식)
-    error = TextField()  # 에러 메시지
-    created_at = DateTimeField(auto_now_add=True)
-    updated_at = DateTimeField(auto_now=True)
-```
+### Folder / ChatSession (chats 앱)
+- **Folder**: `user`, `name`, `type`, `created_at`
+- **ChatSession**: `user`, `folder`(nullable), `title`, `messages`(JSON), `model_id`, `system_instruction`, `recommended_prompts`(JSON), `last_modified`, `created_at`
+
+### Job 모델
+- `user` (FK, 사용자 연결), `status` (IN_QUEUE | IN_PROGRESS | COMPLETED | FAILED)
+- `provider`, `model_id`, `arguments`, `result_json`, `error`, `created_at`, `updated_at`
 
 ### Artifact 모델
-생성된 파일(이미지, 비디오, 텍스트)을 저장
-
-```python
-class Artifact(models.Model):
-    id = UUIDField(primary_key=True)
-    job = ForeignKey(Job)
-    kind = CharField(choices=KIND_CHOICES)  # text, image, video, file
-    s3_key = CharField(null=True, blank=True)  # MinIO 객체 키
-    text_content = TextField(null=True, blank=True)  # 텍스트 결과
-    presigned_url = URLField(null=True, blank=True)  # 임시 접근 URL
-    mime_type = CharField(null=True, blank=True)
-    size_bytes = PositiveBigIntegerField(null=True, blank=True)
-    created_at = DateTimeField(auto_now_add=True)
-```
+- `job` (FK), `kind` (text/image/video/file), `s3_key`, `text_content`, `presigned_url`, `mime_type`, `size_bytes`, `created_at`
 
 ---
 
@@ -811,78 +820,34 @@ class Artifact(models.Model):
 ### ✅ 완료된 기능
 
 #### 프론트엔드
-- [x] React + TypeScript + Vite 프로젝트 설정
-- [x] 다크/라이트 모드 및 테마 시스템
-- [x] 채팅 인터페이스 (멀티 모델 지원)
-- [x] 폴더 기반 프로젝트 관리
-- [x] AI 기반 자동 폴더 생성
-- [x] 추천 프롬프트 기능
-- [x] 마크다운 렌더링 (코드 하이라이팅 포함)
-- [x] Toast 알림 시스템
-- [x] Error Boundary 구현
-- [x] React Router 기반 라우팅
-- [x] Context API를 통한 상태 관리
+- [x] React + TypeScript + Vite, 다크/라이트 모드, 채팅·폴더 UI
+- [x] **비로그인 둘러보기**: 화면 공개, 기능 사용 시 로그인/멤버십 유도 (검정 화면 없음)
+- [x] **로그아웃 시 빈 페이지** 이동, 채팅 상태 초기화
+- [x] 채팅·폴더 **DB 연동** (chatApi), 디바운스 저장
+- [x] **MembershipModal** (로그인/멤버십 업그레이드 유도), ModelSelector/ChatInput 멤버십 체크
+- [x] 이미지/비디오 생성 → **Jobs 비동기 + 폴링** (aiService)
+- [x] Error Boundary, Toast, React Router, Context API
 
 #### 백엔드
-- [x] Django + DRF 프로젝트 설정
-- [x] PostgreSQL 데이터베이스 연동
-- [x] Redis 캐시/큐 설정
-- [x] Celery 비동기 작업 설정
-- [x] MinIO 파일 저장소 연동
-- [x] Jobs API 구현
-- [x] OpenAI API 연동 (텍스트 생성)
-- [x] Firebase Admin SDK 연동 (토큰 검증)
-- [x] JWT 토큰 발급 및 갱신
-- [x] Artifact 모델 (텍스트/이미지/비디오 지원)
-- [x] 환경 변수 관리
-- [x] Docker Compose 인프라 구성
-- [x] Nginx 리버스 프록시 설정
-- [x] **프로젝트 구조 최적화** (중복 디렉토리 제거, 경로 통일)
-- [x] **Pydantic v2 호환성** (regex → pattern, validator → field_validator)
-- [x] **코드 정리** (사용하지 않는 import 제거, 레거시 코드 주석 처리)
-- [x] **Firebase Admin SDK 연동** (토큰 검증)
-- [x] **JWT 토큰 발급 및 갱신**
-
-#### 인증 및 사용자 관리
-- [x] Firebase Google 로그인 (프론트엔드)
-- [x] Firebase ID Token 검증 (백엔드)
-- [x] JWT 토큰 발급 및 갱신
-- [x] 사용자별 데이터 분리 (localStorage)
+- [x] **커스텀 User** (`users.User`) + 멤버십 (free/standard/premium), API 키 상태
+- [x] **chats 앱**: Folder, ChatSession, 사용자별 CRUD API
+- [x] **Jobs 사용자 연결**: `GET/POST /jobs/`, `GET /jobs/<id>/`, **Celery 비동기**, 사용자당 최대 4건 동시, 429 초과 시
+- [x] Redis 캐시·Celery 브로커, MinIO, Nginx, Docker Compose
+- [x] Firebase 토큰 검증 → JWT + **User·멤버십 DB 저장**
 
 #### 인프라
-- [x] Docker 컨테이너화
-- [x] Docker Compose 오케스트레이션
-- [x] Nginx 설정
-- [x] 데이터베이스 마이그레이션 자동화
-- [x] 헬스 체크 엔드포인트
+- [x] Docker, Docker Compose, Nginx, 마이그레이션, 헬스체크
 
 ### 🔄 진행 중
 
-- [ ] Gemini API 연동 (Google GenAI SDK 기준, 코드 작성 완료, 테스트 필요)
-- [ ] 이미지 생성 API (DALL-E 3)
-- [ ] 비디오 생성 API (SORA/VEO)
-- [ ] 프론트엔드-백엔드 완전 연동 (일부 완료)
-
-### ✅ 최근 완료 (2026-01-24)
-
-- [x] **Google 로그인 프론트엔드-백엔드 연동**
-  - Firebase ID Token 검증 및 JWT 발급 구현
-  - 사용자별 데이터 분리 (localStorage)
-  - API 클라이언트 JWT 토큰 자동 관리
-- [x] **도메인 변경**: `weav.ai` → `weavai.hub`
+- [ ] Gemini API 연동 (코드 완료, 운영 테스트)
+- [ ] 실시간 작업 진행률 UI (선택)
 
 ### 📋 향후 계획
 
-- [ ] Celery를 통한 비동기 AI 작업 처리
-  - 텍스트: 동기 → 비동기 전환
-  - 비디오: 처음부터 비동기 (Job 폴링) 구현
-- [ ] 파일 업로드/다운로드 기능
-- [ ] 결제 시스템 (Stripe) 연동
-- [ ] 사용자 프로필 관리
-- [ ] 생성물 갤러리
-- [ ] 작업 히스토리 관리
-- [ ] 실시간 작업 진행 상황 표시
-- [ ] 프로덕션 배포 (Cloudflare Tunnel)
+- [ ] 결제 (Stripe), `/pricing` 페이지
+- [ ] Rate Limit / Quota 강화
+- [ ] 파일 업로드/다운로드, 프로덕션 배포 (Cloudflare Tunnel)
 
 ---
 
@@ -1133,6 +1098,15 @@ cat infra/nginx/conf.d/weavai.conf | grep proxy_intercept_errors
 
 ## 📝 변경 이력
 
+### 2026-01-24
+- ✅ **사용자·멤버십 DB**: 커스텀 User (`users.User`), `membership_type`(free/standard/premium), `membership_expires_at`, `has_openai_key`/`has_gemini_key`, `photo_url`, `last_login_at`
+- ✅ **채팅·폴더 DB 저장**: `chats` 앱 (Folder, ChatSession), 사용자별 CRUD API, 프론트 chatApi 연동
+- ✅ **Jobs 사용자 연결·비동기**: Job `user` FK, `GET/POST /jobs/`, `GET /jobs/<id>/`, Celery `run_ai_job`, 사용자당 최대 4건 동시, 429 초과 시
+- ✅ **비로그인 둘러보기**: ProtectedRoute 제거, 화면 공개, 기능 사용 시 MembershipModal 유도
+- ✅ **멤버십 유도 모달**: 비로그인→로그인, 로그인+무료→업그레이드 유도 (검정 화면 없음)
+- ✅ **로그아웃 시 빈 페이지**: Sidebar 로그아웃 → `resetChat`, `navigate(/)`
+- ✅ 이미지/비디오 생성 → Jobs API 비동기 + 프론트 폴링
+
 ### 2026-01-23
 - ✅ OpenAI 텍스트 생성 API 연동 완료 (Responses API 기준)
 - ✅ Jobs API 기본 구조 완성
@@ -1179,5 +1153,5 @@ cat infra/nginx/conf.d/weavai.conf | grep proxy_intercept_errors
 
 ---
 
-**마지막 업데이트**: 2026-01-23  
-**문서 버전**: 2.3 (프로덕션 기준 정확성 강화 + 최적화 작업 반영)
+**마지막 업데이트**: 2026-01-24  
+**문서 버전**: 2.4 (사용자·멤버십·채팅·Jobs DB·비동기·UX 최신화 반영)

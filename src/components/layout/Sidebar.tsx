@@ -324,6 +324,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                                 onClick={async () => {
                                     try {
                                         await signOut();
+                                        resetChat();
+                                        navigate('/');
                                         toast.success("로그아웃되었습니다.");
                                     } catch (e) {
                                         toast.error("로그아웃 실패");

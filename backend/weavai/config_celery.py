@@ -30,12 +30,6 @@ app.conf.beat_schedule = {
 # ===== 작업 라우팅 =====
 # 특정 작업을 특정 큐로 라우팅
 app.conf.task_routes = {
-    # FAL.ai 관련 작업들 - 추후 확장 예정
-    # 'jobs.tasks.submit_fal_job': {'queue': 'fal_jobs'},
-    # 'jobs.tasks.poll_fal_job': {'queue': 'fal_jobs'},
-    # 'jobs.tasks.finalize_job': {'queue': 'fal_jobs'},
-
-    # 유지보수 작업
     'jobs.tasks.cleanup_old_jobs': {'queue': 'maintenance'},
 }
 

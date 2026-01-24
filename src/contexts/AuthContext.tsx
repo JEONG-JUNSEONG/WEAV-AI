@@ -3,8 +3,22 @@ import { User, onAuthStateChanged } from 'firebase/auth';
 import { auth, loginWithGoogle, logout } from '../services/firebase';
 import { userService } from '../services/userService';
 
+interface UserInfo {
+  uid: string;
+  email?: string;
+  display_name?: string;
+  photo_url?: string;
+  membership_type?: 'free' | 'standard' | 'premium';
+  membership_expires_at?: string | null;
+  is_membership_active?: boolean;
+  can_use_premium_features?: boolean;
+  has_openai_key?: boolean;
+  has_gemini_key?: boolean;
+}
+
 interface AuthContextType {
   user: User | null;
+  userInfo: UserInfo | null;
   loading: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -14,6 +28,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,14 +45,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           // Firestore 동기화
           await userService.syncUserToFirestore(currentUser);
-          // 백엔드 JWT 토큰 발급
+          // 백엔드 JWT 토큰 발급 (멤버십 정보 포함)
           await userService.verifyFirebaseToken(currentUser);
+          // 저장된 사용자 정보 로드
+          const saved = localStorage.getItem('weav_user_info');
+          if (saved) {
+            try {
+              setUserInfo(JSON.parse(saved));
+            } catch (e) {
+              console.error('Failed to parse user info:', e);
+            }
+          }
         } catch (error) {
           console.error("Failed to sync user or verify token:", error);
         }
       } else {
-        // 로그아웃 시 토큰 정리
+        // 로그아웃 시 토큰 및 사용자 정보 정리
         userService.clearAuth();
+        localStorage.removeItem('weav_user_info');
+        setUserInfo(null);
       }
       setLoading(false);
     });
@@ -78,6 +104,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       await logout();
       setUser(null);
+      setUserInfo(null);
+      localStorage.removeItem('weav_user_info');
       
       // 로그아웃 후 채팅 상태 초기화는 ChatContext에서 처리
       // 여기서는 사용자 상태만 관리
@@ -88,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, userInfo, loading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

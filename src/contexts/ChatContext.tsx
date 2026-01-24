@@ -4,6 +4,7 @@ import { Message, AIModel, ChatSession, PromptTemplate } from '../types';
 import { VideoOptions } from '../components/chat/VideoOptions';
 import { MODELS } from '../constants/models';
 import { aiService } from '../services/aiService';
+import { chatApi } from '../services/chatApi';
 import { useFolder } from './FolderContext';
 import { useAuth } from './AuthContext';
 import { toast } from 'sonner';
@@ -49,10 +50,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Persisted Recent Chats (사용자별로 분리)
     const [recentChats, setRecentChats] = useState<ChatSession[]>([]);
 
-    // 사용자 변경 시 채팅 데이터 초기화 및 로드
+    // 사용자 변경 시 초기화 및 최근 채팅 DB 로드
     useEffect(() => {
         if (!user) {
-            // 로그아웃 시 데이터 초기화
             setMessages([]);
             setRecentChats([]);
             setCurrentSessionId(null);
@@ -60,20 +60,19 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setHasStarted(false);
             return;
         }
-
-        // 새 사용자 로그인 시 해당 사용자의 데이터 로드
-        const saved = localStorage.getItem(`weav_recent_chats_${user.uid}`);
-        if (saved) {
+        let ok = true;
+        (async () => {
             try {
-                setRecentChats(JSON.parse(saved));
-            } catch (error) {
-                console.error('Failed to load recent chats:', error);
+                const list = await chatApi.getChats(null);
+                if (!ok) return;
+                setRecentChats(list);
+            } catch (e) {
+                console.error('Failed to load recent chats:', e);
                 setRecentChats([]);
             }
-        } else {
-            setRecentChats([]);
-        }
-    }, [user?.uid]); // user.uid가 변경될 때만 실행
+        })();
+        return () => { ok = false; };
+    }, [user?.uid]);
 
     // Current Chat UI State
     const [messages, setMessages] = useState<Message[]>([]);
@@ -95,17 +94,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const abortControllerRef = useRef<AbortController | null>(null);
 
-    // Persistence for Recent Chats (사용자별로 분리)
-    useEffect(() => {
-        if (!user) return;
-        try {
-            localStorage.setItem(`weav_recent_chats_${user.uid}`, JSON.stringify(recentChats));
-        } catch (error) {
-            console.error('Failed to save recent chats to localStorage:', error);
-        }
-    }, [recentChats, user]);
+    const recentPersistRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Sync Current Messages to Session Storage (Folder or Recent)
+
     useEffect(() => {
         if (!currentSessionId || messages.length === 0) return;
 
@@ -123,8 +114,27 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setRecentChats(prev => prev.map(c =>
                 c.id === currentSessionId ? { ...c, ...sessionUpdate } : c
             ));
+            if (recentPersistRef.current) clearTimeout(recentPersistRef.current);
+            recentPersistRef.current = setTimeout(async () => {
+                recentPersistRef.current = null;
+                try {
+                    await chatApi.updateChat(currentSessionId, {
+                        messages: sessionUpdate.messages as any,
+                        model_id: selectedModel.id,
+                        system_instruction: systemInstruction ?? ''
+                    });
+                } catch (e) {
+                    console.warn('Failed to persist recent chat:', e);
+                }
+            }, 1500);
         }
-    }, [messages, currentSessionId, activeFolderId, selectedModel, systemInstruction, updateFolderChat, user]);
+        return () => {
+            if (recentPersistRef.current) {
+                clearTimeout(recentPersistRef.current);
+                recentPersistRef.current = null;
+            }
+        };
+    }, [messages, currentSessionId, activeFolderId, selectedModel, systemInstruction, updateFolderChat]);
 
     const stopGeneration = () => {
         if (abortControllerRef.current) {
@@ -195,47 +205,55 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
-    const deleteChat = (sessionId: string, folderId?: string) => {
-        if (currentSessionId === sessionId) {
-            resetChat();
+    const deleteChat = async (sessionId: string, folderId?: string) => {
+        if (currentSessionId === sessionId) resetChat();
+        try {
+            if (folderId) {
+                await removeChatFromFolder(folderId, sessionId);
+            } else {
+                await chatApi.deleteChat(sessionId);
+                setRecentChats(prev => prev.filter(c => c.id !== sessionId));
+            }
+            toast.info('채팅이 삭제되었습니다.');
+        } catch (e: any) {
+            toast.error(e?.message || '채팅 삭제에 실패했습니다.');
         }
-
-        if (folderId) {
-            removeChatFromFolder(folderId, sessionId);
-        } else {
-            setRecentChats(prev => prev.filter(c => c.id !== sessionId));
-        }
-        toast.info("채팅이 삭제되었습니다.");
     };
 
     const sendMessage = async (overridePrompt?: string) => {
         const promptToSend = overridePrompt || inputValue;
         if (!promptToSend.trim() || isLoading) return;
 
-        // Create New Session if needed
+        // 로그인 확인 (DB 저장 필요)
+        if (!user) {
+            toast.error('로그인이 필요한 기능입니다.');
+            return;
+        }
+
+        let effectiveSessionId = currentSessionId;
+        // Create New Session if needed (DB에 저장)
         if (!currentSessionId) {
-            const newId = Date.now().toString();
-            setCurrentSessionId(newId);
             const title = promptToSend.slice(0, 30) + (promptToSend.length > 30 ? '...' : '');
-
-            const newSession: ChatSession = {
-                id: newId,
-                title,
-                messages: [],
-                modelId: selectedModel.id,
-                systemInstruction,
-                lastModified: Date.now(),
-                folderId: activeFolderId || undefined
-            };
-
-            if (activeFolderId) {
-                addChatToFolder(activeFolderId, newSession);
-            } else {
-                setRecentChats(prev => [newSession, ...prev]);
+            try {
+                const c = await chatApi.createChat({
+                    title,
+                    folder_id: activeFolderId || undefined,
+                    messages: [],
+                    model_id: selectedModel.id,
+                    system_instruction: systemInstruction ?? ''
+                });
+                effectiveSessionId = c.id;
+                setCurrentSessionId(c.id);
+                if (activeFolderId) {
+                    addChatToFolder(activeFolderId, c);
+                } else {
+                    setRecentChats(prev => [c, ...prev]);
+                }
+                navigate(`/chat/${c.id}`);
+            } catch (e: any) {
+                toast.error(e?.message || '채팅을 만들 수 없습니다.');
+                return;
             }
-
-            // Navigate to the new session URL
-            navigate(`/chat/${newId}`);
         }
 
         setHasStarted(true);
@@ -313,16 +331,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         };
 
                         // Update current session with video generation
-                        if (activeFolderId) {
-                            updateFolderChat(activeFolderId, currentSessionId, {
+                        if (activeFolderId && effectiveSessionId) {
+                            updateFolderChat(activeFolderId, effectiveSessionId, {
                                 videoGenerations: [
-                                    ...(folderChats[activeFolderId]?.find(c => c.id === currentSessionId)?.videoGenerations || []),
+                                    ...(folderChats[activeFolderId]?.find(c => c.id === effectiveSessionId)?.videoGenerations || []),
                                     videoGeneration
                                 ]
                             });
-                        } else {
+                        } else if (effectiveSessionId) {
                             setRecentChats(prev => prev.map(c =>
-                                c.id === currentSessionId
+                                c.id === effectiveSessionId
                                     ? { ...c, videoGenerations: [...(c.videoGenerations || []), videoGeneration] }
                                     : c
                             ));

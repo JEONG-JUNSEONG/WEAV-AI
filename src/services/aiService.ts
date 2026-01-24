@@ -270,36 +270,41 @@ export const aiService = {
   },
 
   /**
-   * Generate Video (Routes to Sora 2)
+   * Generate Video (백엔드 Jobs API — 비동기, 폴링)
    */
   generateVideo: async (model: AIModel, prompt: string, videoOptions: VideoOptions, user: any, signal?: AbortSignal): Promise<string | null> => {
-    try {
-      // 백엔드 Jobs API 호출
-      const jobData = {
-        provider: model.provider || 'openai',
-        model_id: model.id,
-        arguments: {
-          prompt,
-          duration: videoOptions.duration,
-          resolution: videoOptions.resolution,
-          aspect_ratio: videoOptions.aspectRatio,
-          style: videoOptions.style
-        },
-        store_result: true
-      };
+    const jobData = {
+      provider: model.provider || 'openai',
+      model_id: model.id,
+      arguments: {
+        prompt,
+        duration: videoOptions.duration,
+        resolution: videoOptions.resolution,
+        aspect_ratio: videoOptions.aspectRatio,
+        style: videoOptions.style
+      },
+      store_result: true
+    };
 
-      const result = await apiClient.post('/api/v1/jobs/', jobData);
+    const createRes = (await apiClient.post('/api/v1/jobs/', jobData)) as { id?: string };
+    const jobId = createRes.id;
+    if (!jobId) throw new Error('작업 ID를 받지 못했습니다.');
 
-      if (result.result && result.result.type === 'video' && result.result.url) {
-        return result.result.url;
-      } else {
+    const poll = async (): Promise<string | null> => {
+      if (signal?.aborted) throw new Error('비디오 생성이 중단되었습니다.');
+      const detail = (await apiClient.get(`/api/v1/jobs/${jobId}/`)) as { status: string; result?: { url?: string; text?: string }; error?: string };
+      if (detail.status === 'COMPLETED') {
+        if (detail.result?.url) return detail.result.url;
         throw new Error('비디오 생성 결과를 받지 못했습니다.');
       }
+      if (detail.status === 'FAILED') {
+        throw new Error(detail.error || '비디오 생성에 실패했습니다.');
+      }
+      await new Promise(r => setTimeout(r, 2000));
+      return poll();
+    };
 
-    } catch (error) {
-      console.error('Video generation error:', error);
-      throw error;
-    }
+    return poll();
   },
 
   // --- Helper Functions ---
@@ -405,32 +410,35 @@ export const aiService = {
 
 
   /**
-   * Generate Image (Routes to Google or OpenAI)
+   * Generate Image (백엔드 Jobs API — 비동기, 폴링)
    */
   generateImage: async (model: AIModel, prompt: string, user: any, signal?: AbortSignal): Promise<string | null> => {
-    try {
-      // 백엔드 Jobs API 호출
-      const jobData = {
-        provider: model.provider || 'openai',
-        model_id: model.id,
-        arguments: {
-          prompt
-        },
-        store_result: true
-      };
+    const jobData = {
+      provider: model.provider || 'openai',
+      model_id: model.id,
+      arguments: { prompt },
+      store_result: true
+    };
 
-      const result = await apiClient.post('/api/v1/jobs/', jobData);
+    const createRes = (await apiClient.post('/api/v1/jobs/', jobData)) as { id?: string };
+    const jobId = createRes.id;
+    if (!jobId) throw new Error('작업 ID를 받지 못했습니다.');
 
-      if (result.result && result.result.type === 'image' && result.result.url) {
-        return result.result.url;
-      } else {
+    const poll = async (): Promise<string | null> => {
+      if (signal?.aborted) throw new Error('이미지 생성이 중단되었습니다.');
+      const detail = (await apiClient.get(`/api/v1/jobs/${jobId}/`)) as { status: string; result?: { url?: string; text?: string }; error?: string };
+      if (detail.status === 'COMPLETED') {
+        if (detail.result?.url) return detail.result.url;
         throw new Error('이미지 생성 결과를 받지 못했습니다.');
       }
+      if (detail.status === 'FAILED') {
+        throw new Error(detail.error || '이미지 생성에 실패했습니다.');
+      }
+      await new Promise(r => setTimeout(r, 1500));
+      return poll();
+    };
 
-    } catch (error) {
-      console.error('Image generation error:', error);
-      throw error;
-    }
+    return poll();
   },
 
   /**

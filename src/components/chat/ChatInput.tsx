@@ -2,7 +2,10 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ArrowUp, AlertCircle, X, Sparkles, ChevronRight, Square } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
 import { VideoOptions, VideoOptions as VideoOptionsType } from './VideoOptions';
-import { VideoCreationStudio } from './VideoCreationStudio'; // Import Studio
+import { VideoCreationStudio } from './VideoCreationStudio';
+import { MembershipModal } from '@/components/membership/MembershipModal';
+import { useAuth } from '@/contexts/AuthContext';
+import { MODELS } from '@/constants/models';
 import { AIModel, PromptTemplate } from '@/types';
 
 interface ChatInputProps {
@@ -40,10 +43,35 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     showRecommendedPrompts = false,
     onCloseRecommendedPrompts
 }) => {
+    const { user, userInfo } = useAuth();
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const [showWarning, setShowWarning] = useState(false);
     const [showPrompts, setShowPrompts] = useState(false);
+    const [showMembershipModal, setShowMembershipModal] = useState(false);
+    const [requiredFeature, setRequiredFeature] = useState<string>();
     const promptMenuRef = useRef<HTMLDivElement>(null);
+
+    // 모델 사용 가능 여부 확인
+    const canUseModel = (model: AIModel): boolean => {
+        if (!user) {
+            // 비로그인: gpt-5.2-instant만 가능
+            return model.id === 'gpt-5.2-instant';
+        }
+        if (!userInfo) return false;
+        // 로그인: 멤버십 확인
+        if (model.id === 'gpt-5.2-instant') return true; // 무료 모델
+        return userInfo.can_use_premium_features ?? false;
+    };
+
+    const handleSend = () => {
+        if (!canUseModel(selectedModel)) {
+            const modelName = selectedModel.name;
+            setRequiredFeature(`${modelName} 사용`);
+            setShowMembershipModal(true);
+            return;
+        }
+        onSend();
+    };
 
     // Video Options State
     const defaultVideoOptions: VideoOptionsType = {
@@ -84,11 +112,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         if (e.nativeEvent.isComposing) return;
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            onSend();
+            handleSend();
         }
     };
 
     const handleModelSelect = (model: AIModel) => {
+        if (!canUseModel(model)) {
+            setRequiredFeature(`${model.name} 사용`);
+            setShowMembershipModal(true);
+            return;
+        }
         if (hasStarted && model.id !== selectedModel.id) {
             setShowWarning(true);
         }
@@ -118,14 +151,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     <VideoCreationStudio
                         inputValue={inputValue}
                         onInputChange={onInputChange}
-                        onSend={onSend}
+                        onSend={handleSend}
                         isLoading={isLoading}
                         selectedModel={selectedModel}
-                        onModelSelect={onModelSelect} // Pass function
+                        onModelSelect={handleModelSelect}
                         videoOptions={currentVideoOptions}
                         onVideoOptionsChange={onVideoOptionsChange || (() => { })}
                         onClose={() => {
-                            onModelSelect({ id: 'gpt-5.2-instant', name: 'ChatGPT-5.2 Instant', category: 'GPT', apiModelName: 'gpt-5-mini' });
+                            const freeModel = MODELS.find(m => m.id === 'gpt-5.2-instant') || selectedModel;
+                            handleModelSelect(freeModel);
                         }}
                     />
                 </div>
@@ -327,7 +361,7 @@ ${hasStarted ? 'h-32 opacity-100' : 'h-0 opacity-0'}`}
                                 </button>
                             )}
                             <button
-                                onClick={onSend}
+                                onClick={handleSend}
                                 disabled={!inputValue.trim() || isLoading}
                                 className={`p-2 rounded-lg transition-all duration-200 shrink-0 ${inputValue.trim() && !isLoading ? 'text-white hover:opacity-90 hover:scale-105' : 'bg-neutral-800 text-neutral-600 cursor-not-allowed'} ${isLoading ? 'animate-pulse' : ''}`}
                                 style={inputValue.trim() && !isLoading ? {
@@ -352,6 +386,12 @@ ${hasStarted ? 'h-32 opacity-100' : 'h-0 opacity-0'}`}
                     </p>
                 </div>
             </div>
+
+            <MembershipModal
+                isOpen={showMembershipModal}
+                onClose={() => setShowMembershipModal(false)}
+                requiredFeature={requiredFeature}
+            />
         </div>
     );
 };

@@ -10,13 +10,7 @@ networks:
 volumes:
   postgres_data:
     driver: local
-  minio_data:
-    driver: local
-    driver_opts:
-      # MinIO 데이터는 외장하드에 저장 (환경변수로 경로 지정)
-      o: bind
-      type: none
-      device: ${MINIO_DATA_DIR:-/tmp/minio-data}
+  # minio_data는 직접 경로 마운트로 변경 (Docker Desktop for Mac 호환성)
 
 services:
   # ===== 데이터베이스 레이어 =====
@@ -76,7 +70,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change_this_long_random_password}
       MINIO_BROWSER: on  # 웹 콘솔 활성화
     volumes:
-      - minio_data:/data  # 외장하드에 데이터 저장
+      - ${MINIO_DATA_DIR:-./minio-data}:/data  # 외장하드에 데이터 저장 (직접 경로 마운트)
     command: server /data --console-address ":9001"
     # 외부 공개 금지 - 127.0.0.1로만 바인딩
     ports:
@@ -118,7 +112,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      # Redis/Celery
+      # Redis/Celery (REDIS_URL은 Django cache·Celery 공용)
+      REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       # MinIO 스토리지
@@ -175,7 +170,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      # Redis/Celery
+      # Redis/Celery (REDIS_URL은 Django cache·Celery 공용)
+      REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       # MinIO 스토리지
@@ -192,7 +188,7 @@ services:
       AI_PROVIDER_DEFAULT: ${AI_PROVIDER_DEFAULT:-openai}
       MAX_TEXT_CHARS: ${MAX_TEXT_CHARS:-8000}
       MAX_OUTPUT_TOKENS: ${MAX_OUTPUT_TOKENS:-1024}
-    command: celery -A weavai worker -l INFO --concurrency=2
+    command: celery -A weavai worker -l INFO --concurrency=4
     # 워커는 포트 노출하지 않음
 
   # ===== 프론트엔드 레이어 =====

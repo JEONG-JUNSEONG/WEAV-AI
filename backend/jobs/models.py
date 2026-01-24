@@ -1,6 +1,7 @@
 # WEAV AI Jobs 앱 모델
 # AI 작업 관리 (FAL.ai 제외 - 추후 확장 예정)
 
+from django.conf import settings
 from django.db import models
 import uuid
 
@@ -34,6 +35,15 @@ class Job(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='jobs',
+        help_text='작업을 생성한 사용자'
+    )
 
     # 작업 정보
     status = models.CharField(
@@ -78,7 +88,7 @@ class Job(models.Model):
     # )
     # fal_response_url = models.URLField(
     #     blank=True,
-    null=True,
+    #     null=True,
     #     help_text='결과 조회 URL'
     # )
     # fal_cancel_url = models.URLField(
@@ -115,6 +125,7 @@ class Job(models.Model):
         indexes = [
             models.Index(fields=['status', 'created_at']),
             models.Index(fields=['provider', 'status']),
+            models.Index(fields=['user', 'status']),
         ]
 
     def __str__(self):

@@ -43,7 +43,7 @@ const SoraLogo = ({ className }: { className?: string }) => (
 const ModelSelectorComponent: React.FC<ModelSelectorProps> = ({ selectedModel, onSelect, disabled }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { user } = useAuth();
+  const { user, userInfo } = useAuth();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -71,9 +71,16 @@ const ModelSelectorComponent: React.FC<ModelSelectorProps> = ({ selectedModel, o
   };
 
   const isModelLocked = useCallback((modelId: string) => {
-    if (user) return false; // Logged in user has access to everything
-    return modelId !== 'gpt-5.2-instant'; // Guest only has access to instant
-  }, [user]);
+    if (!user) {
+      // 비로그인: gpt-5.2-instant만 가능
+      return modelId !== 'gpt-5.2-instant';
+    }
+    if (!userInfo) return true; // 로그인했지만 정보 없으면 잠금
+    // 무료 모델은 항상 사용 가능
+    if (modelId === 'gpt-5.2-instant') return false;
+    // 프리미엄 기능은 멤버십 필요
+    return !(userInfo.can_use_premium_features ?? false);
+  }, [user, userInfo]);
 
   const groupedModels = useMemo(() => {
     return MODELS.reduce((acc, model) => {
