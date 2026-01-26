@@ -10,6 +10,7 @@
 ```bash
 cd frontend
 npm ci
+npm run check:env
 npm run build
 ```
 - [ ] Build output created at `frontend/dist/`

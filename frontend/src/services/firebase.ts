@@ -6,25 +6,15 @@ import { toast } from 'sonner';
 // Vite exposes env variables via import.meta.env and requires VITE_ prefix
 const env = import.meta.env;
 
-// Debug: Log all environment variables (detailed)
-console.log("🔍 Firebase 환경변수 디버깅:");
-console.log("전체 env 객체:", env);
-console.log("VITE_FIREBASE_API_KEY:", env?.VITE_FIREBASE_API_KEY);
-console.log("VITE_FIREBASE_API_KEY 타입:", typeof env?.VITE_FIREBASE_API_KEY);
-console.log("VITE_FIREBASE_API_KEY 길이:", env?.VITE_FIREBASE_API_KEY?.length || 0);
-
-console.log("VITE_FIREBASE_AUTH_DOMAIN:", env?.VITE_FIREBASE_AUTH_DOMAIN);
-console.log("VITE_FIREBASE_PROJECT_ID:", env?.VITE_FIREBASE_PROJECT_ID);
-console.log("VITE_FIREBASE_STORAGE_BUCKET:", env?.VITE_FIREBASE_STORAGE_BUCKET);
-console.log("VITE_FIREBASE_MESSAGING_SENDER_ID:", env?.VITE_FIREBASE_MESSAGING_SENDER_ID);
-console.log("VITE_FIREBASE_APP_ID:", env?.VITE_FIREBASE_APP_ID);
-
-// Check .env file loading
-console.log("📁 Vite env loading check:");
-console.log("import.meta.env:", import.meta.env);
-console.log("DEV:", import.meta.env.DEV);
-console.log("PROD:", import.meta.env.PROD);
-console.log("MODE:", import.meta.env.MODE);
+if (import.meta.env.DEV) {
+  console.log("🔍 Firebase env check (dev only)");
+  console.log("VITE_FIREBASE_API_KEY set:", Boolean(env?.VITE_FIREBASE_API_KEY));
+  console.log("VITE_FIREBASE_AUTH_DOMAIN set:", Boolean(env?.VITE_FIREBASE_AUTH_DOMAIN));
+  console.log("VITE_FIREBASE_PROJECT_ID set:", Boolean(env?.VITE_FIREBASE_PROJECT_ID));
+  console.log("VITE_FIREBASE_STORAGE_BUCKET set:", Boolean(env?.VITE_FIREBASE_STORAGE_BUCKET));
+  console.log("VITE_FIREBASE_MESSAGING_SENDER_ID set:", Boolean(env?.VITE_FIREBASE_MESSAGING_SENDER_ID));
+  console.log("VITE_FIREBASE_APP_ID set:", Boolean(env?.VITE_FIREBASE_APP_ID));
+}
 
 const firebaseConfig = {
   apiKey: env?.VITE_FIREBASE_API_KEY,
@@ -53,19 +43,25 @@ const requiredKeys = [
 const missingKeys = requiredKeys.filter(key => !env?.[key]);
 
 if (missingKeys.length > 0) {
-  console.warn("🚨 Firebase 설정 누락:", missingKeys);
-  console.warn("📝 다음 환경변수들을 .env 파일에 추가해주세요:");
-  missingKeys.forEach(key => {
-    console.warn(`   ${key}=your_value_here`);
-  });
-  console.warn("🔗 Firebase Console: https://console.firebase.google.com/");
+  if (import.meta.env.DEV) {
+    console.warn("🚨 Firebase 설정 누락:", missingKeys);
+    console.warn("📝 다음 환경변수들을 .env 파일에 추가해주세요:");
+    missingKeys.forEach(key => {
+      console.warn(`   ${key}=your_value_here`);
+    });
+    console.warn("🔗 Firebase Console: https://console.firebase.google.com/");
+  } else {
+    console.error("Firebase 설정이 누락되어 초기화에 실패했습니다.");
+  }
 } else {
   try {
     // Prevent double initialization
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     googleProvider = new GoogleAuthProvider();
-    console.log("✅ Firebase 초기화 성공!");
+    if (import.meta.env.DEV) {
+      console.log("✅ Firebase 초기화 성공!");
+    }
   } catch (error) {
     console.error("❌ Firebase 초기화 실패:", error);
   }
