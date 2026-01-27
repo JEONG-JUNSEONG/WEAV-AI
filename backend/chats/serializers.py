@@ -10,7 +10,7 @@ class FolderSerializer(serializers.ModelSerializer):
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):
-    folder_id = serializers.UUIDField(source='folder_id', read_only=True, allow_null=True)
+    folder_id = serializers.UUIDField(read_only=True, allow_null=True)
 
     class Meta:
         model = ChatSession
