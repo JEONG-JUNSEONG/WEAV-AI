@@ -12,7 +12,8 @@ networks:
 volumes:
   postgres_data:
     driver: local
-  # minio_data는 직접 경로 마운트로 변경 (Docker Desktop for Mac 호환성)
+  minio_data:
+    driver: local
 
 services:
   # ===== 데이터베이스 레이어 =====
@@ -68,11 +69,11 @@ services:
     networks:
       - weavai_network
     environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-weavai_admin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change_this_long_random_password}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-weavai_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change_this_long_random_password}
       MINIO_BROWSER: on  # 웹 콘솔 활성화
     volumes:
-      - ${MINIO_DATA_DIR:-./minio-data}:/data  # 외장하드에 데이터 저장 (직접 경로 마운트)
+      - ${MINIO_DATA_DIR:-minio_data}:/data  # 기본은 named volume, 경로 지정 시 바인드
     command: server /data --console-address ":9001"
     # 외부 공개 금지 - 127.0.0.1로만 바인딩
     ports:
@@ -118,29 +119,20 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # MinIO 스토리지
-      MINIO_ENDPOINT_URL: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-weavai_admin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-      MINIO_BUCKET: ${MINIO_BUCKET:-weavai-files}
+      # MinIO/S3 스토리지
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-weavai_admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_STORAGE_BUCKET_NAME: ${MINIO_BUCKET:-weavai-files}
       # AI 서비스
       FAL_KEY: ${FAL_KEY}
       FAL_TEXT_ENDPOINT: ${FAL_TEXT_ENDPOINT:-fal-ai/any-llm}
-      FAL_TEXT_DEFAULT_MODEL: ${FAL_TEXT_DEFAULT_MODEL:-meta-llama/llama-4-maverick}
-      FAL_IMAGE_MODEL_FLUX: ${FAL_IMAGE_MODEL_FLUX:-fal-ai/flux-2}
-      FAL_IMAGE_MODEL_BANANA: ${FAL_IMAGE_MODEL_BANANA:-fal-ai/nano-banana-pro}
-      FAL_VIDEO_MODEL_PRO: ${FAL_VIDEO_MODEL_PRO:-fal-ai/sora-2}
+      FAL_TEXT_DEFAULT_MODEL: ${FAL_TEXT_DEFAULT_MODEL:-openai/gpt-4o-mini}
       # Firebase Admin
       FIREBASE_SERVICE_ACCOUNT_KEY_PATH: ${FIREBASE_SERVICE_ACCOUNT_KEY_PATH:-}
       AI_PROVIDER_DEFAULT: ${AI_PROVIDER_DEFAULT:-fal}
       MAX_TEXT_CHARS: ${MAX_TEXT_CHARS:-8000}
       MAX_OUTPUT_TOKENS: ${MAX_OUTPUT_TOKENS:-1024}
-      # Billing (PortOne)
-      USE_PORTONE: ${USE_PORTONE:-True}
-      USE_STRIPE: ${USE_STRIPE:-False}
-      PORTONE_API_SECRET: ${PORTONE_API_SECRET:-}
-      PORTONE_WEBHOOK_SECRET: ${PORTONE_WEBHOOK_SECRET:-}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     volumes:
       - ../backend:/app
     # 디버그: Django 직접 접근을 위한 임시 호스트 포트 바인딩 (프로덕션에서는 제거)
@@ -187,26 +179,20 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # MinIO 스토리지
-      MINIO_ENDPOINT_URL: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-weavai_admin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-      MINIO_BUCKET: ${MINIO_BUCKET:-weavai-files}
+      # MinIO/S3 스토리지
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-weavai_admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_STORAGE_BUCKET_NAME: ${MINIO_BUCKET:-weavai-files}
       # AI 서비스
       FAL_KEY: ${FAL_KEY}
       FAL_TEXT_ENDPOINT: ${FAL_TEXT_ENDPOINT:-fal-ai/any-llm}
-      FAL_TEXT_DEFAULT_MODEL: ${FAL_TEXT_DEFAULT_MODEL:-meta-llama/llama-4-maverick}
-      FAL_IMAGE_MODEL_FLUX: ${FAL_IMAGE_MODEL_FLUX:-fal-ai/flux-2}
-      FAL_IMAGE_MODEL_BANANA: ${FAL_IMAGE_MODEL_BANANA:-fal-ai/nano-banana-pro}
-      FAL_VIDEO_MODEL_PRO: ${FAL_VIDEO_MODEL_PRO:-fal-ai/sora-2}
+      FAL_TEXT_DEFAULT_MODEL: ${FAL_TEXT_DEFAULT_MODEL:-openai/gpt-4o-mini}
       # Firebase Admin
       FIREBASE_SERVICE_ACCOUNT_KEY_PATH: ${FIREBASE_SERVICE_ACCOUNT_KEY_PATH:-}
       AI_PROVIDER_DEFAULT: ${AI_PROVIDER_DEFAULT:-fal}
       MAX_TEXT_CHARS: ${MAX_TEXT_CHARS:-8000}
       MAX_OUTPUT_TOKENS: ${MAX_OUTPUT_TOKENS:-1024}
-      # Billing (PortOne) - Celery task에서 결제 조회 API 호출용
-      USE_PORTONE: ${USE_PORTONE:-True}
-      PORTONE_API_SECRET: ${PORTONE_API_SECRET:-}
     volumes:
       - ../backend:/app
     command: celery -A weavai worker -l INFO --concurrency=4 -n celery@%h

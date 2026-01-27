@@ -1,6 +1,6 @@
 # WEAV AI 인프라 설정
 
-Mac Mini + 외장하드 기반 프로덕션급 AI 생성 서비스 인프라입니다.
+Mac/Windows에서 바로 실행 가능한 Docker Compose 인프라입니다.
 
 ##  서비스 구성
 
@@ -31,12 +31,12 @@ FAL_KEY=your-fal-ai-api-key
 
 FIREBASE_SERVICE_ACCOUNT_KEY_PATH=/path/to/firebase-key.json
 
-MINIO_DATA_DIR=./minio-data
-MINIO_ROOT_USER=admin
+MINIO_DATA_DIR=minio_data
+MINIO_ROOT_USER=weavai_admin
 MINIO_ROOT_PASSWORD=your-password
 ```
 
-### 2. MinIO 데이터 디렉터리
+### 2. MinIO 데이터 디렉터리 (선택)
 
 ```bash
 mkdir -p infra/minio-data
@@ -113,3 +113,4 @@ docker compose restart api
 ---
 
 **마지막 업데이트**: 2026-01-27
+> 기본값은 named volume(`minio_data`)을 사용합니다. 로컬 디렉터리로 바인드하려면 `MINIO_DATA_DIR=./minio-data`로 변경하세요.
