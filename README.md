@@ -215,6 +215,7 @@ npm run dev
 - [결제 (PortOne)](./docs/결제_구현_가이드.md) - Billing MVP 설정 및 플로우
 - [빠른 시작](./docs/빠른_시작_가이드.md) - 바로 실행하는 단계별 가이드
 - [테스트 로드맵](./docs/테스트_로드맵.md) - 구조 변경 후 점검 절차
+- [Windows 빠른 실행](./docs/빠른_실행_가이드_win.md) - Windows 환경 실행 가이드
 - [백엔드 README](./backend/README.md) - 백엔드 설정
 - [인프라 README](./infra/README.md) - 인프라 설정
 
