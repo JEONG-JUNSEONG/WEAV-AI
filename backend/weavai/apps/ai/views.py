@@ -42,7 +42,7 @@ def complete_chat(request):
     """
     try:
         provider = request.data.get('provider') or getattr(settings, 'AI_PROVIDER_DEFAULT', 'fal')
-        model = request.data.get('model') or request.data.get('model_id')
+        model = request.data.get('model')
         input_text = request.data.get('input_text')
         system_prompt = request.data.get('system_prompt')
         history = request.data.get('history', [])
