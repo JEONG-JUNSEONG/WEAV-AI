@@ -38,6 +38,8 @@ fal.ai(GPT·Gemini 채팅, Google Imagen·FLUX 이미지) 기반 채팅·이미�
 |------|------|------|
 | `FAL_KEY` | fal.ai API 키 (필수) | `your_fal_ai_key` |
 
+**팀 협업 시**: 저장소에는 `.env`가 없습니다. 팀원은 `infra/.env.example`을 복사해 `infra/.env`로 만들고, **FAL_KEY** 값만 팀에서 공유받으면 됩니다. (Docker만 사용할 때는 이 파일 하나만 있으면 빌드·기동·테스트 가능. 프론트 로컬 실행 시에는 `frontend/.env.example` → `frontend/.env` 복사 후 `VITE_API_BASE_URL=http://localhost:8080` 사용.)
+
 ### 1-2. 이미지 빌드 및 서비스 기동
 
 **macOS / Linux (Makefile):**
