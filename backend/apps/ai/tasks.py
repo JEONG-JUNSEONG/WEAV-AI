@@ -6,6 +6,8 @@ from apps.chats.models import Message, ImageRecord, Job
 from apps.chats.services import memory_service
 from .router import run_chat, run_image
 from .errors import AIError
+from .utils import get_rag_enhanced_system_prompt, get_rag_context_string
+from .system_rules import prepend_model_rule
 
 
 @shared_task(bind=True, max_retries=2)
@@ -14,7 +16,17 @@ def task_chat(self, job_id: int, prompt: str, model: str, system_prompt: Optiona
     job.status = 'running'
     job.save(update_fields=['status', 'updated_at'])
     try:
-        reply = run_chat(prompt, model=model, system_prompt=system_prompt)
+        base_system_prompt = prepend_model_rule(system_prompt, model) or "You are a helpful AI assistant."
+        # Include last few turns so follow-ups like "그 다음역은?" have context
+        recent = list(job.session.messages.order_by("-created_at")[:6])
+        recent.reverse()
+        recent_conversation = "\n".join(
+            f"{m.role.capitalize()}: {m.content}" for m in recent if (m.role and m.content)
+        )
+        enhanced_system_prompt = get_rag_enhanced_system_prompt(
+            job.session.id, prompt, base_system_prompt, recent_conversation=recent_conversation
+        )
+        reply = run_chat(prompt, model=model, system_prompt=enhanced_system_prompt)
         with transaction.atomic():
             msg = Message.objects.create(session=job.session, role='assistant', content=reply)
             job.message = msg
@@ -59,8 +71,10 @@ def task_image(self, job_id: int, prompt: str, model: str, aspect_ratio: str = '
             pass
 
     try:
+        rag_context = get_rag_context_string(job.session.id, prompt)
+        effective_prompt = f"{rag_context}\n\nRequest: {prompt}" if rag_context else prompt
         images = run_image(
-            prompt,
+            effective_prompt,
             model=model,
             aspect_ratio=aspect_ratio,
             num_images=num_images,

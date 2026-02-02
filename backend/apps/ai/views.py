@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from apps.chats.models import Session, Message, Job, SESSION_KIND_CHAT, SESSION_KIND_IMAGE
 from apps.chats.serializers import MessageSerializer, ImageRecordSerializer
 from .schemas import TextGenerationRequest, ImageGenerationRequest
@@ -18,28 +19,35 @@ def complete_chat(request):
     session_id = request.data.get('session_id')
     if not session_id:
         return Response({'detail': 'session_id required'}, status=status.HTTP_400_BAD_REQUEST)
-    session = get_object_or_404(Session, pk=session_id)
-    if session.kind != SESSION_KIND_CHAT:
-        return Response({'detail': 'Not a chat session'}, status=status.HTTP_400_BAD_REQUEST)
-    user_msg = Message.objects.create(session=session, role='user', content=body.prompt)
-    if Message.objects.filter(session_id=session.pk).count() == 1:
-        new_title = (body.prompt.strip() or session.title)[:255]
-        session.title = new_title
-        session.save(update_fields=['title', 'updated_at'])
-    job = Job.objects.create(session=session, kind='chat', status='pending')
-    task = tasks.task_chat.delay(
-        job.id,
-        prompt=body.prompt,
-        model=body.model or 'google/gemini-2.5-flash',
-        system_prompt=body.system_prompt,
-    )
-    job.task_id = task.id
-    job.save(update_fields=['task_id'])
-    return Response({
-        'task_id': task.id,
-        'job_id': job.id,
-        'message_id': user_msg.id,
-    }, status=status.HTTP_202_ACCEPTED)
+    try:
+        session = get_object_or_404(Session, pk=session_id)
+        if session.kind != SESSION_KIND_CHAT:
+            return Response({'detail': 'Not a chat session'}, status=status.HTTP_400_BAD_REQUEST)
+        user_msg = Message.objects.create(session=session, role='user', content=body.prompt)
+        if Message.objects.filter(session_id=session.pk).count() == 1:
+            new_title = (body.prompt.strip() or session.title)[:255]
+            session.title = new_title
+            session.save(update_fields=['title', 'updated_at'])
+        job = Job.objects.create(session=session, kind='chat', status='pending')
+        task = tasks.task_chat.delay(
+            job.id,
+            prompt=body.prompt,
+            model=body.model or 'google/gemini-2.5-flash',
+            system_prompt=body.system_prompt,
+        )
+        job.task_id = task.id
+        job.save(update_fields=['task_id'])
+        return Response({
+            'task_id': task.id,
+            'job_id': job.id,
+            'message_id': user_msg.id,
+        }, status=status.HTTP_202_ACCEPTED)
+    except Http404:
+        raise
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("complete_chat error")
+        return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
