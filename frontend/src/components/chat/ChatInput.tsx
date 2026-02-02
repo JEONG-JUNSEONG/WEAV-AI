@@ -1,58 +1,56 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useChat } from '@/contexts/ChatContext';
 import { ModelSelector } from './ModelSelector';
 
-const DEFAULT_CHAT_MODEL = 'google/gemini-2.5-flash';
-const DEFAULT_IMAGE_MODEL = 'fal-ai/imagen4/preview';
-
-type SessionModels = Record<number, { chat: string; image: string }>;
-
-function getModelsForSession(modelBySession: SessionModels, sessionId: number) {
-  const stored = modelBySession[sessionId];
-  return {
-    chat: stored?.chat ?? DEFAULT_CHAT_MODEL,
-    image: stored?.image ?? DEFAULT_IMAGE_MODEL,
-  };
-}
-
 export function ChatInput() {
   const { currentSession } = useApp();
-  const { sendChatMessage, sendImageRequest, sending, error, clearError } = useChat();
+  const {
+    sendChatMessage,
+    sendImageRequest,
+    sending,
+    error,
+    clearError,
+    stopGeneration,
+    getChatModel,
+    setChatModel,
+    getImageModel,
+    setImageModel,
+    regeneratePrompt,
+    clearRegeneratePrompt,
+    regenerateChat,
+  } = useChat();
   const [prompt, setPrompt] = useState('');
-  const [modelBySession, setModelBySession] = useState<SessionModels>({});
+  const inputRef = useRef<HTMLInputElement>(null);
 
   if (!currentSession) return null;
 
-  const { chat: chatModel, image: imageModel } = getModelsForSession(modelBySession, currentSession.id);
+  const chatModel = getChatModel(currentSession.id);
+  const imageModel = getImageModel(currentSession.id);
   const isChat = currentSession.kind === 'chat';
+  const isRegenerateMode =
+    isChat && regeneratePrompt != null && regeneratePrompt.sessionId === currentSession.id;
 
-  const setChatModel = (model: string) => {
-    setModelBySession((prev) => ({
-      ...prev,
-      [currentSession.id]: {
-        ...getModelsForSession(prev, currentSession.id),
-        chat: model,
-      },
-    }));
-  };
-  const setImageModel = (model: string) => {
-    setModelBySession((prev) => ({
-      ...prev,
-      [currentSession.id]: {
-        ...getModelsForSession(prev, currentSession.id),
-        image: model,
-      },
-    }));
-  };
+  useEffect(() => {
+    if (regeneratePrompt?.sessionId === currentSession?.id) {
+      setPrompt(regeneratePrompt.prompt);
+      inputRef.current?.focus();
+    }
+  }, [regeneratePrompt?.sessionId, regeneratePrompt?.prompt, currentSession?.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = prompt.trim();
     if (!text || sending) return;
     setPrompt('');
-    if (isChat) await sendChatMessage(text, chatModel);
-    else await sendImageRequest(text, imageModel);
+    if (isRegenerateMode && currentSession) {
+      clearRegeneratePrompt();
+      await regenerateChat(currentSession.id, { prompt: text, model: chatModel });
+    } else if (isChat) {
+      await sendChatMessage(text, chatModel);
+    } else {
+      await sendImageRequest(text, imageModel);
+    }
   };
 
   return (
@@ -70,23 +68,60 @@ export function ChatInput() {
           <ModelSelector
             kind={currentSession.kind}
             value={isChat ? chatModel : imageModel}
-            onChange={isChat ? setChatModel : setImageModel}
+            onChange={isChat ? (m) => setChatModel(currentSession.id, m) : (m) => setImageModel(currentSession.id, m)}
           />
           <input
+            ref={inputRef}
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={isChat ? '메시지를 입력하세요...' : '이미지 설명을 입력하세요...'}
+            placeholder={
+              isRegenerateMode
+                ? '수정 후 Enter 또는 재질문 버튼으로 재생성'
+                : isChat
+                  ? '메시지를 입력하세요...'
+                  : '이미지 설명을 입력하세요...'
+            }
             className="flex-1 bg-input border border-input rounded px-4 py-2 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             disabled={sending}
           />
-          <button
-            type="submit"
-            disabled={sending || !prompt.trim()}
-            className="px-4 py-2 rounded bg-primary text-primary-foreground font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90"
-          >
-            {sending ? '처리 중...' : isChat ? '전송' : '생성'}
-          </button>
+          {sending ? (
+            <button
+              type="button"
+              onClick={stopGeneration}
+              className="px-4 py-2 rounded bg-destructive text-destructive-foreground font-medium hover:bg-destructive/90"
+            >
+              중단
+            </button>
+          ) : isRegenerateMode ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  clearRegeneratePrompt();
+                  setPrompt('');
+                }}
+                className="px-4 py-2 rounded bg-muted text-muted-foreground font-medium hover:bg-muted/80"
+              >
+                취소
+              </button>
+              <button
+                type="submit"
+                disabled={!prompt.trim()}
+                className="px-4 py-2 rounded bg-primary text-primary-foreground font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90"
+              >
+                재질문
+              </button>
+            </>
+          ) : (
+            <button
+              type="submit"
+              disabled={!prompt.trim()}
+              className="px-4 py-2 rounded bg-primary text-primary-foreground font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90"
+            >
+              {isChat ? '전송' : '생성'}
+            </button>
+          )}
         </div>
       </form>
     </div>

@@ -1,10 +1,12 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useApp } from '@/contexts/AppContext';
+import { useChat } from '@/contexts/ChatContext';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 
 export function ChatView() {
   const { currentSession } = useApp();
+  const { setRegeneratePrompt } = useChat();
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,7 +34,26 @@ export function ChatView() {
               <p>메시지를 입력하고 전송하세요.</p>
             </div>
           ) : (
-            messages.map((msg) => <ChatMessage key={msg.id} message={msg} />)
+            messages.map((msg) => {
+              const lastUserMsg =
+                messages.length >= 2 && messages[messages.length - 1].role === 'assistant'
+                  ? messages[messages.length - 2]
+                  : null;
+              const isLastUserMessage =
+                msg.role === 'user' && lastUserMsg != null && msg.id === lastUserMsg.id;
+              return (
+                <ChatMessage
+                  key={msg.id}
+                  message={msg}
+                  isLastUserMessage={isLastUserMessage}
+                  onEditRequested={
+                    isLastUserMessage && currentSession
+                      ? (prompt) => setRegeneratePrompt(currentSession.id, prompt)
+                      : undefined
+                  }
+                />
+              );
+            })
           )
         ) : (
           <>

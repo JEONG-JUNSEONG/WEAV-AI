@@ -1,51 +1,123 @@
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { chatApi } from '@/services/api/chatApi';
 import { useApp } from './AppContext';
+
+const POLL_INTERVAL = 1500;
+const POLL_MAX = 60;
+const DEFAULT_CHAT_MODEL = 'google/gemini-2.5-flash';
+const DEFAULT_IMAGE_MODEL = 'fal-ai/imagen4/preview';
+
+type SessionModels = Record<number, { chat: string; image: string }>;
+
+function getStoredModels(stored: SessionModels | undefined, sessionId: number) {
+  const s = stored?.[sessionId];
+  return { chat: s?.chat ?? DEFAULT_CHAT_MODEL, image: s?.image ?? DEFAULT_IMAGE_MODEL };
+}
+
+type RegenerateChatOptions = { model?: string; prompt?: string };
+
+type RegeneratePromptState = { sessionId: number; prompt: string } | null;
 
 type ChatContextValue = {
   sending: boolean;
   error: string | null;
   sendChatMessage: (prompt: string, model: string) => Promise<void>;
   sendImageRequest: (prompt: string, model: string, aspectRatio?: string) => Promise<void>;
+  stopGeneration: () => void;
+  regenerateChat: (sessionId: number, options?: RegenerateChatOptions) => Promise<void>;
+  regenerateImage: (sessionId: number, aspectRatio?: string) => Promise<void>;
+  getChatModel: (sessionId: number) => string;
+  setChatModel: (sessionId: number, model: string) => void;
+  getImageModel: (sessionId: number) => string;
+  setImageModel: (sessionId: number, model: string) => void;
+  /** 연필 클릭 시 하단 입력창에 넣을 내용 (재질문 모드) */
+  regeneratePrompt: RegeneratePromptState;
+  setRegeneratePrompt: (sessionId: number, prompt: string) => void;
+  clearRegeneratePrompt: () => void;
   clearError: () => void;
 };
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
-const POLL_INTERVAL = 1500;
-const POLL_MAX = 60;
-
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const { currentSession, refreshSession, patchSession } = useApp();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modelBySession, setModelBySession] = useState<SessionModels>({});
+  const [regeneratePrompt, setRegeneratePromptState] = useState<RegeneratePromptState>(null);
+  const modelBySessionRef = useRef<SessionModels>({});
+  modelBySessionRef.current = modelBySession;
+
+  const setRegeneratePrompt = useCallback((sessionId: number, prompt: string) => {
+    setRegeneratePromptState({ sessionId, prompt });
+  }, []);
+  const clearRegeneratePrompt = useCallback(() => {
+    setRegeneratePromptState(null);
+  }, []);
+  const abortRef = useRef(false);
+  const currentTaskIdRef = useRef<string | null>(null);
+  const setSendingRef = useRef<(v: boolean) => void>(() => {});
+  setSendingRef.current = setSending;
+
+  const getChatModel = useCallback((sessionId: number) => getStoredModels(modelBySessionRef.current, sessionId).chat, []);
+  const getImageModel = useCallback((sessionId: number) => getStoredModels(modelBySessionRef.current, sessionId).image, []);
+  const setChatModel = useCallback((sessionId: number, model: string) => {
+    setModelBySession((prev) => ({
+      ...prev,
+      [sessionId]: { ...getStoredModels(prev, sessionId), chat: model },
+    }));
+  }, []);
+  const setImageModel = useCallback((sessionId: number, model: string) => {
+    setModelBySession((prev) => ({
+      ...prev,
+      [sessionId]: { ...getStoredModels(prev, sessionId), image: model },
+    }));
+  }, []);
 
   const pollJob = useCallback(
     async (taskId: string, sessionId: number) => {
       for (let i = 0; i < POLL_MAX; i++) {
+        if (abortRef.current) {
+          abortRef.current = false;
+          currentTaskIdRef.current = null;
+          return;
+        }
         const status = await chatApi.jobStatus(taskId);
         if (status.status === 'success' || status.status === 'failure') {
+          currentTaskIdRef.current = null;
           const isStillCurrent = await refreshSession(sessionId);
           if (status.status === 'failure' && status.error && isStillCurrent) setError(status.error);
           return;
         }
         await new Promise((r) => setTimeout(r, POLL_INTERVAL));
       }
+      currentTaskIdRef.current = null;
       const isStillCurrent = await refreshSession(sessionId);
       if (isStillCurrent) setError('응답 대기 시간이 초과되었습니다.');
     },
     [refreshSession]
   );
 
+  const stopGeneration = useCallback(() => {
+    abortRef.current = true;
+    setSendingRef.current(false);
+    const taskId = currentTaskIdRef.current;
+    if (taskId) {
+      chatApi.cancelJob(taskId).catch(() => {});
+      currentTaskIdRef.current = null;
+    }
+  }, []);
+
   const sendChatMessage = useCallback(
     async (prompt: string, model: string) => {
       if (!currentSession || currentSession.kind !== 'chat') return;
       const sessionId = currentSession.id;
+      abortRef.current = false;
       setSending(true);
       setError(null);
       try {
         const res = await chatApi.completeChat(sessionId, prompt, model);
-        // 첫 메시지면 제목을 첫 문구로 바로 반영(백엔드도 동일 설정, 여기서는 UI 즉시 갱신)
+        currentTaskIdRef.current = res.task_id;
         const isFirstMessage = !currentSession.messages?.length;
         if (isFirstMessage && prompt.trim()) {
           await patchSession(sessionId, { title: prompt.trim().slice(0, 255) });
@@ -54,30 +126,84 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         }
         await pollJob(res.task_id, sessionId);
       } catch (e) {
+        currentTaskIdRef.current = null;
         setError(e instanceof Error ? e.message : '전송 실패');
       } finally {
         setSending(false);
       }
     },
-    [currentSession, pollJob]
+    [currentSession, pollJob, patchSession, refreshSession]
   );
 
   const sendImageRequest = useCallback(
     async (prompt: string, model: string, aspectRatio?: string) => {
       if (!currentSession || currentSession.kind !== 'image') return;
       const sessionId = currentSession.id;
+      abortRef.current = false;
       setSending(true);
       setError(null);
       try {
         const res = await chatApi.completeImage(sessionId, prompt, model, aspectRatio);
+        currentTaskIdRef.current = res.task_id;
+        const isFirstImage = !currentSession.image_records?.length;
+        if (isFirstImage && prompt.trim()) {
+          await patchSession(sessionId, { title: prompt.trim().slice(0, 255) });
+        } else {
+          await refreshSession(sessionId);
+        }
         await pollJob(res.task_id, sessionId);
       } catch (e) {
+        currentTaskIdRef.current = null;
         setError(e instanceof Error ? e.message : '생성 실패');
       } finally {
         setSending(false);
       }
     },
-    [currentSession, pollJob]
+    [currentSession, pollJob, patchSession, refreshSession]
+  );
+
+  const regenerateChat = useCallback(
+    async (sessionId: number, options?: RegenerateChatOptions) => {
+      if (!currentSession || currentSession.kind !== 'chat' || currentSession.id !== sessionId) return;
+      const model = options?.model ?? getChatModel(sessionId);
+      const prompt = options?.prompt;
+      abortRef.current = false;
+      setSending(true);
+      setError(null);
+      try {
+        const res = await chatApi.regenerateChat(sessionId, model, prompt);
+        currentTaskIdRef.current = res.task_id;
+        await refreshSession(sessionId);
+        await pollJob(res.task_id, sessionId);
+      } catch (e) {
+        currentTaskIdRef.current = null;
+        setError(e instanceof Error ? e.message : '재생성 실패');
+      } finally {
+        setSending(false);
+      }
+    },
+    [currentSession, pollJob, refreshSession, getChatModel]
+  );
+
+  const regenerateImage = useCallback(
+    async (sessionId: number, aspectRatio?: string) => {
+      if (!currentSession || currentSession.kind !== 'image' || currentSession.id !== sessionId) return;
+      abortRef.current = false;
+      setSending(true);
+      setError(null);
+      try {
+        const res = await chatApi.regenerateImage(sessionId, aspectRatio);
+        currentTaskIdRef.current = res.task_id;
+        await refreshSession(sessionId);
+        await pollJob(res.task_id, sessionId);
+      } catch (e) {
+        currentTaskIdRef.current = null;
+        setError(e instanceof Error ? e.message : '재생성 실패');
+      } finally {
+        setSending(false);
+      }
+    },
+    [currentSession, pollJob, refreshSession]
   );
 
   const value: ChatContextValue = {
@@ -85,6 +211,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     error,
     sendChatMessage,
     sendImageRequest,
+    stopGeneration,
+    regenerateChat,
+    regenerateImage,
+    getChatModel,
+    setChatModel,
+    getImageModel,
+    setImageModel,
+    regeneratePrompt,
+    setRegeneratePrompt,
+    clearRegeneratePrompt,
     clearError: () => setError(null),
   };
 
