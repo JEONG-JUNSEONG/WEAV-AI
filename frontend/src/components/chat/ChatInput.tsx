@@ -3,16 +3,49 @@ import { useApp } from '@/contexts/AppContext';
 import { useChat } from '@/contexts/ChatContext';
 import { ModelSelector } from './ModelSelector';
 
+const DEFAULT_CHAT_MODEL = 'google/gemini-2.5-flash';
+const DEFAULT_IMAGE_MODEL = 'fal-ai/imagen4/preview';
+
+type SessionModels = Record<number, { chat: string; image: string }>;
+
+function getModelsForSession(modelBySession: SessionModels, sessionId: number) {
+  const stored = modelBySession[sessionId];
+  return {
+    chat: stored?.chat ?? DEFAULT_CHAT_MODEL,
+    image: stored?.image ?? DEFAULT_IMAGE_MODEL,
+  };
+}
+
 export function ChatInput() {
   const { currentSession } = useApp();
   const { sendChatMessage, sendImageRequest, sending, error, clearError } = useChat();
   const [prompt, setPrompt] = useState('');
-  const [chatModel, setChatModel] = useState('google/gemini-2.5-flash');
-  const [imageModel, setImageModel] = useState('fal-ai/imagen4/preview');
+  const [modelBySession, setModelBySession] = useState<SessionModels>({});
 
   if (!currentSession) return null;
 
+  const { chat: chatModel, image: imageModel } = getModelsForSession(modelBySession, currentSession.id);
   const isChat = currentSession.kind === 'chat';
+
+  const setChatModel = (model: string) => {
+    setModelBySession((prev) => ({
+      ...prev,
+      [currentSession.id]: {
+        ...getModelsForSession(prev, currentSession.id),
+        chat: model,
+      },
+    }));
+  };
+  const setImageModel = (model: string) => {
+    setModelBySession((prev) => ({
+      ...prev,
+      [currentSession.id]: {
+        ...getModelsForSession(prev, currentSession.id),
+        image: model,
+      },
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = prompt.trim();

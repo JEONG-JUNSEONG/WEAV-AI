@@ -11,11 +11,17 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <AppHeader onMenuClick={() => setSidebarOpen(true)} />
-      <div className="flex-1 flex overflow-hidden">
-        <ChatView />
-      </div>
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <main
+        className={`flex-1 flex flex-col min-w-0 transition-[margin] duration-300 ease-out ${
+          sidebarOpen ? 'ml-72' : 'ml-0'
+        }`}
+      >
+        <AppHeader onMenuClick={() => setSidebarOpen((v) => !v)} />
+        <div className="flex-1 flex overflow-hidden">
+          <ChatView />
+        </div>
+      </main>
     </div>
   );
 }

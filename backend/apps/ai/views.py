@@ -22,6 +22,11 @@ def complete_chat(request):
     if session.kind != SESSION_KIND_CHAT:
         return Response({'detail': 'Not a chat session'}, status=status.HTTP_400_BAD_REQUEST)
     user_msg = Message.objects.create(session=session, role='user', content=body.prompt)
+    # 첫 메시지면 세션 제목을 사용자 첫 문구로 설정 (DB 기준으로 카운트해 역참조 캐시 이슈 방지)
+    if Message.objects.filter(session_id=session.pk).count() == 1:
+        new_title = (body.prompt.strip() or session.title)[:255]
+        session.title = new_title
+        session.save(update_fields=['title', 'updated_at'])
     job = Job.objects.create(session=session, kind='chat', status='pending')
     task = tasks.task_chat.delay(
         job.id,
