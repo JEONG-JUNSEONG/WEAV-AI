@@ -117,3 +117,39 @@ export const generateSceneImage = async (prompt: string, style: string, aspectRa
   await mockDelay(500);
   return createMockImage(style || "Scene", aspectRatio);
 };
+
+export interface GeneratedMeta {
+  title: string;
+  description: string;
+  pinnedComment: string;
+}
+
+/**
+ * 영상 제목, 설명(타임라인·해시태그 포함), 고정댓글을 AI로 생성
+ */
+export const generateMetaData = async (context: {
+  topic?: string;
+  summary?: string;
+  targetDuration?: string;
+}): Promise<GeneratedMeta> => {
+  await mockDelay(800);
+  const topic = context.topic || "영상 주제";
+  const duration = context.targetDuration || "1m";
+  return {
+    title: `${topic} | 60초 요약으로 핵심만 정리`,
+    description: `${topic}에 대한 핵심 내용을 짧고 명확하게 정리했습니다.\n\n📌 타임라인\n0:00 오프닝\n0:10 본문 파트 1\n0:25 본문 파트 2\n0:40 클라이맥스\n0:55 아웃트로 & 구독 CTA\n\n#${topic.replace(/\s/g, "_")} #숏폼 #요약 #WEAV스튜디오 #영상제작 #AI`,
+    pinnedComment: `📌 이 영상은 WEAV AI 스튜디오로 제작되었습니다.\n궁금한 점이나 다음에 다뤄줬으면 하는 주제가 있으면 댓글로 남겨주세요. 구독과 좋아요는 다음 영상 제작에 큰 힘이 됩니다 🙏`,
+  };
+};
+
+/**
+ * 유튜브 썸네일을 분석하고, 그 스타일을 벤치마킹한 이미지 URL 생성
+ * (실제 연동 시 레퍼런스 이미지 분석 + 이미지 생성 API 호출)
+ */
+export const generateBenchmarkThumbnail = async (referenceThumbnailUrl: string): Promise<{ imageUrl: string; analysisSummary: string }> => {
+  await mockDelay(1200);
+  return {
+    imageUrl: createMockImage("벤치마킹 썸네일", "16:9"),
+    analysisSummary: "레퍼런스 썸네일의 구도·색감·타이포 톤을 분석해 동일한 분위기의 벤치마킹 이미지를 생성했습니다. 클릭률 테스트용 A/B 후보로 활용할 수 있습니다.",
+  };
+};

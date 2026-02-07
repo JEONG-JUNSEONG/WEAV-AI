@@ -17,7 +17,7 @@ import { StudioGlobalContextType, StudioScene, StudioScriptSegment, StudioAnalys
 import { 
   analyzeTopic, analyzeUrlPattern, generateTopics, generatePlanningStep, 
   synthesizeMasterScript, splitScriptIntoScenes, generateSceneImage,
-  analyzeReferenceImage, generateScenePrompt
+  analyzeReferenceImage, generateScenePrompt, generateMetaData, generateBenchmarkThumbnail
 } from '@/services/studio/geminiService';
 
 // --- [전역 상태 관리] ---
@@ -1218,6 +1218,490 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
   );
 };
 
+// --- [목업: Step 5~8 공통 목업 데이터] ---
+const MOCK_VOICES = [
+  { id: 'ko-female-1', name: '한국어 여성 (밝은 톤)', lang: 'ko', gender: 'F', sample: '안녕하세요. 오늘 영상도 재미있게 봐 주세요.' },
+  { id: 'ko-male-1', name: '한국어 남성 (차분)', lang: 'ko', gender: 'M', sample: '핵심만 간단히 전달하는 내러티브에 적합합니다.' },
+  { id: 'ko-female-2', name: '한국어 여성 (친근)', lang: 'ko', gender: 'F', sample: '일상 브이로그나 리뷰에 잘 어울려요.' },
+  { id: 'ko-male-2', name: '한국어 남성 (뉴스)', lang: 'ko', gender: 'M', sample: '속보나 정보 전달형 콘텐츠에 추천합니다.' },
+  { id: 'en-neutral', name: 'English (Neutral)', lang: 'en', gender: 'N', sample: 'Suitable for global shorts and tutorials.' },
+];
+
+const MOCK_VOICE_SEGMENTS = [
+  { id: 1, sceneIndex: 1, text: '오늘은 60초 안에 핵심만 정리해 드립니다.', durationSec: 4.2, status: 'done' as const },
+  { id: 2, sceneIndex: 2, text: '첫 번째, 기획 단계에서 타깃을 명확히 하세요.', durationSec: 3.8, status: 'done' as const },
+  { id: 3, sceneIndex: 3, text: '두 번째, 훅이 되는 오프닝 한 문장을 설계하세요.', durationSec: 4.1, status: 'done' as const },
+  { id: 4, sceneIndex: 4, text: '마지막으로 CTA와 구독 유도로 마무리하면 됩니다.', durationSec: 3.5, status: 'done' as const },
+];
+
+const MOCK_VIDEO_TIMELINE = [
+  { id: 'v1', label: '씬 1', duration: 4.2, thumb: null },
+  { id: 'v2', label: '씬 2', duration: 3.8, thumb: null },
+  { id: 'v3', label: '씬 3', duration: 4.1, thumb: null },
+  { id: 'v4', label: '씬 4', duration: 3.5, thumb: null },
+];
+
+type ThumbnailCandidate = {
+  id: string;
+  title: string;
+  imagePlaceholder?: string;
+  imageUrl?: string;
+  ctrHint: string;
+  isSelected: boolean;
+};
+
+const MOCK_THUMBNAILS: ThumbnailCandidate[] = [
+  { id: 't1', title: '메인 (이미지 강조)', imagePlaceholder: '썸네일 A', ctrHint: '클릭률 예상 +12%', isSelected: true },
+  { id: 't2', title: '대안 (텍스트 강조)', imagePlaceholder: '썸네일 B', ctrHint: '클릭률 예상 +8%', isSelected: false },
+  { id: 't3', title: '감성 톤', imagePlaceholder: '썸네일 C', ctrHint: '클릭률 예상 +5%', isSelected: false },
+];
+
+function getYoutubeVideoId(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  const match =
+    trimmed.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/) ||
+    trimmed.match(/^([a-zA-Z0-9_-]{11})$/);
+  return match ? match[1] : null;
+}
+
+function getYoutubeThumbnailUrl(videoId: string): string {
+  return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+}
+
+// --- [Step 5: AI 음성 합성] ---
+const VoiceStep = () => {
+  const [selectedVoiceId, setSelectedVoiceId] = useState(MOCK_VOICES[0].id);
+  const [segments] = useState(MOCK_VOICE_SEGMENTS);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+
+  const selectedVoice = MOCK_VOICES.find(v => v.id === selectedVoiceId);
+
+  return (
+    <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
+      <SectionHeader
+        kicker="Step 5 / Voice"
+        title="AI 음성 합성"
+        subtitle="장면별 대본을 선택한 보이스로 합성합니다. 미리듣기 후 전체 내보내기를 진행하세요."
+      />
+
+      <div className="grid grid-cols-12 gap-8 items-start">
+        <div className="col-span-12 lg:col-span-4 space-y-6">
+          <div className="ui-card space-y-4">
+            <span className="ui-label">보이스 선택</span>
+            <div className="space-y-2">
+              {MOCK_VOICES.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVoiceId(v.id)}
+                  className={`style-choice w-full flex items-start gap-3 px-4 py-3 rounded-xl border transition-colors ${selectedVoiceId === v.id ? 'is-selected' : ''}`}
+                >
+                  <div className="mt-0.5 style-choice__icon"><Mic2 size={18}/></div>
+                  <div className="text-left flex-1 min-w-0">
+                    <div className="style-choice__title">{v.name}</div>
+                    <div className="style-choice__desc text-xs truncate">{v.sample}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="ui-card ui-card--muted">
+            <span className="ui-label">미리듣기</span>
+            <p className="text-sm text-slate-600 mb-2">{selectedVoice?.sample}</p>
+            <button className="ui-btn ui-btn--secondary w-full" disabled>
+              <PlayCircle size={14} /> 샘플 재생 (목업)
+            </button>
+          </div>
+        </div>
+
+        <div className="col-span-12 lg:col-span-8 space-y-4">
+          <div className="ui-card flex items-center justify-between">
+            <span className="ui-label">장면별 음성 세그먼트</span>
+            <button
+              onClick={() => setIsSynthesizing(true)}
+              disabled={isSynthesizing}
+              className="ui-btn ui-btn--primary"
+            >
+              {isSynthesizing ? <Loader2 size={14} className="animate-spin" /> : <Music4 size={14} />}
+              전체 합성 (목업)
+            </button>
+          </div>
+          <div className="space-y-3">
+            {segments.map((seg, idx) => (
+              <div key={seg.id} className="ui-card flex items-center gap-4">
+                <span className="ui-step__num is-selected">{(idx + 1).toString().padStart(2, '0')}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-900 truncate">{seg.text}</p>
+                  <p className="text-xs text-slate-500">{seg.durationSec}초 · 씬 {seg.sceneIndex}</p>
+                </div>
+                <span className="ui-pill">{seg.status === 'done' ? '완료' : '대기'}</span>
+                <button className="ui-btn ui-btn--ghost" disabled><PlayCircle size={14} /> 재생</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- [Step 6: AI 영상 생성] ---
+const VideoStep = () => {
+  const [timeline] = useState(MOCK_VIDEO_TIMELINE);
+  const [exportProgress, setExportProgress] = useState<number | null>(null);
+
+  const totalDuration = timeline.reduce((acc, t) => acc + t.duration, 0);
+
+  const handleExport = () => {
+    setExportProgress(0);
+    const interval = setInterval(() => {
+      setExportProgress(p => {
+        if (p === null || p >= 100) { clearInterval(interval); return null; }
+        return p + 10;
+      });
+    }, 400);
+  };
+
+  return (
+    <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
+      <SectionHeader
+        kicker="Step 6 / Video"
+        title="AI 영상 생성"
+        subtitle="음성·이미지 타임라인을 합쳐 최종 영상으로 내보냅니다. 포맷에 맞춰 렌더링됩니다."
+      />
+
+      <div className="grid grid-cols-12 gap-8 items-start">
+        <div className="col-span-12 lg:col-span-4 space-y-6">
+          <div className="ui-card space-y-4">
+            <span className="ui-label">내보내기 설정</span>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">포맷</span>
+                <span className="font-medium">9:16 (Shorts)</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">총 길이</span>
+                <span className="font-medium">{totalDuration.toFixed(1)}초</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">클립 수</span>
+                <span className="font-medium">{timeline.length}개</span>
+              </div>
+            </div>
+            <button onClick={handleExport} disabled={exportProgress !== null} className="ui-btn ui-btn--primary w-full">
+              {exportProgress !== null ? (
+                <><Loader2 size={14} className="animate-spin" /> 렌더링 중 {exportProgress}%</>
+              ) : (
+                <><Video size={14} /> 영상 내보내기 (목업)</>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="col-span-12 lg:col-span-8 space-y-4">
+          <div className="ui-card">
+            <span className="ui-label">타임라인 (목업)</span>
+            <div className="flex gap-2 mt-3 overflow-x-auto pb-2">
+              {timeline.map((clip, idx) => (
+                <div
+                  key={clip.id}
+                  className="flex-shrink-0 w-24 aspect-video rounded-xl border border-slate-200 bg-slate-50 flex flex-col items-center justify-center"
+                >
+                  <Film size={20} className="text-slate-400 mb-1" />
+                  <span className="text-xs font-medium text-slate-700">{clip.label}</span>
+                  <span className="text-[10px] text-slate-500">{clip.duration}s</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="ui-card ui-card--muted text-sm text-slate-600">
+            실제 연동 시 음성 트랙과 씬 이미지가 타임라인에 배치된 뒤, 서버/로컬에서 영상으로 렌더링됩니다.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- [Step 7: 최적화 메타 설정 — AI 자동 생성] ---
+const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
+  const { selectedTopic, planningData } = useGlobal();
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [pinnedComment, setPinnedComment] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedOnce, setGeneratedOnce] = useState(false);
+
+  const handleGenerateAll = async () => {
+    setIsGenerating(true);
+    try {
+      const meta = await generateMetaData({
+        topic: selectedTopic,
+        summary: planningData?.summary,
+        targetDuration: planningData?.targetDuration,
+      });
+      setTitle(meta.title);
+      setDescription(meta.description);
+      setPinnedComment(meta.pinnedComment);
+      setGeneratedOnce(true);
+      showToast('메타데이터 생성이 완료되었습니다.');
+    } catch (e) {
+      showToast('메타데이터 생성에 실패했습니다.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleRegenerate = async (field: 'title' | 'description' | 'pinnedComment') => {
+    setIsGenerating(true);
+    try {
+      const meta = await generateMetaData({
+        topic: selectedTopic,
+        summary: planningData?.summary,
+        targetDuration: planningData?.targetDuration,
+      });
+      if (field === 'title') setTitle(meta.title);
+      if (field === 'description') setDescription(meta.description);
+      if (field === 'pinnedComment') setPinnedComment(meta.pinnedComment);
+      showToast(`${field === 'title' ? '제목' : field === 'description' ? '설명' : '고정댓글'}을 다시 생성했습니다.`);
+    } catch (e) {
+      showToast('다시 생성에 실패했습니다.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
+      <SectionHeader
+        kicker="Step 7 / Meta"
+        title="메타데이터 AI 생성"
+        subtitle="영상 제목, 설명(타임라인·해시태그 포함), 고정댓글을 AI가 자동으로 생성합니다. 생성 후 수정 가능합니다."
+        right={
+          <button
+            onClick={handleGenerateAll}
+            disabled={isGenerating}
+            className="ui-btn ui-btn--primary"
+          >
+            {isGenerating ? (
+              <><Loader2 size={16} className="animate-spin" /> 생성 중...</>
+            ) : (
+              <><Sparkles size={16} /> AI로 메타데이터 생성</>
+            )}
+          </button>
+        }
+      />
+
+      <div className="space-y-6">
+        <div className="ui-card space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="ui-label">영상 제목</span>
+            <button
+              type="button"
+              onClick={() => handleRegenerate('title')}
+              disabled={isGenerating}
+              className="ui-btn ui-btn--ghost text-xs"
+            >
+              <RefreshCcw size={12} /> 다시 생성
+            </button>
+          </div>
+          <input
+            type="text"
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="AI 생성 버튼을 누르면 제목이 생성됩니다"
+            className="ui-input"
+          />
+        </div>
+
+        <div className="ui-card space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="ui-label">설명 (타임라인 · 해시태그 포함)</span>
+            <button
+              type="button"
+              onClick={() => handleRegenerate('description')}
+              disabled={isGenerating}
+              className="ui-btn ui-btn--ghost text-xs"
+            >
+              <RefreshCcw size={12} /> 다시 생성
+            </button>
+          </div>
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder="타임라인과 해시태그가 포함된 영상 설명이 생성됩니다"
+            className="ui-textarea min-h-[200px] whitespace-pre-wrap"
+          />
+        </div>
+
+        <div className="ui-card space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="ui-label">고정댓글</span>
+            <button
+              type="button"
+              onClick={() => handleRegenerate('pinnedComment')}
+              disabled={isGenerating}
+              className="ui-btn ui-btn--ghost text-xs"
+            >
+              <RefreshCcw size={12} /> 다시 생성
+            </button>
+          </div>
+          <textarea
+            value={pinnedComment}
+            onChange={e => setPinnedComment(e.target.value)}
+            placeholder="영상 업로드 후 고정할 댓글 문구가 생성됩니다"
+            className="ui-textarea min-h-[120px]"
+          />
+        </div>
+
+        {!generatedOnce && (
+          <div className="ui-card ui-card--muted text-center py-8 text-slate-600">
+            <Monitor size={24} className="mx-auto mb-2 opacity-60" />
+            <p className="text-sm">오른쪽 상단 <strong>AI로 메타데이터 생성</strong>을 누르면 제목·설명·고정댓글이 한 번에 생성됩니다.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- [Step 8: 썸네일 연구소] ---
+const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
+  const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>(MOCK_THUMBNAILS);
+  const [ytUrlInput, setYtUrlInput] = useState('');
+  const [ytThumbnailUrl, setYtThumbnailUrl] = useState<string | null>(null);
+  const [ytThumbnailError, setYtThumbnailError] = useState(false);
+  const [isBenchmarking, setIsBenchmarking] = useState(false);
+  const [benchmarkSummary, setBenchmarkSummary] = useState<string | null>(null);
+
+  const loadYtThumbnail = () => {
+    const id = getYoutubeVideoId(ytUrlInput);
+    if (!id) {
+      setYtThumbnailUrl(null);
+      setYtThumbnailError(true);
+      showToast('유효한 유튜브 URL을 입력해주세요.');
+      return;
+    }
+    setYtThumbnailError(false);
+    setYtThumbnailUrl(getYoutubeThumbnailUrl(id));
+  };
+
+  const handleBenchmark = async () => {
+    if (!ytThumbnailUrl) {
+      showToast('먼저 유튜브 URL을 입력하고 썸네일을 불러와주세요.');
+      return;
+    }
+    setIsBenchmarking(true);
+    setBenchmarkSummary(null);
+    try {
+      const { imageUrl, analysisSummary } = await generateBenchmarkThumbnail(ytThumbnailUrl);
+      setBenchmarkSummary(analysisSummary);
+      const newThumb: ThumbnailCandidate = {
+        id: `bench-${Date.now()}`,
+        title: '벤치마킹 썸네일',
+        imageUrl,
+        ctrHint: '레퍼런스 분석 기반 생성',
+        isSelected: false,
+      };
+      setThumbnails(prev => [...prev, newThumb]);
+      showToast('벤치마킹 썸네일이 생성되었습니다.');
+    } catch (e) {
+      showToast('벤치마킹 생성에 실패했습니다.');
+    } finally {
+      setIsBenchmarking(false);
+    }
+  };
+
+  const selectThumb = (id: string) => {
+    setThumbnails(prev => prev.map(t => ({ ...t, isSelected: t.id === id })));
+  };
+
+  return (
+    <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
+      <SectionHeader
+        kicker="Step 8 / Thumbnail"
+        title="썸네일 연구소"
+        subtitle="유튜브 URL로 썸네일을 불러온 뒤 벤치마킹하면, 같은 톤의 썸네일을 AI가 생성합니다."
+      />
+
+      <div className="ui-card space-y-4">
+        <span className="ui-label">유튜브 썸네일 불러오기</span>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            type="text"
+            value={ytUrlInput}
+            onChange={e => { setYtUrlInput(e.target.value); setYtThumbnailError(false); }}
+            onKeyDown={e => e.key === 'Enter' && loadYtThumbnail()}
+            placeholder="https://www.youtube.com/watch?v=... 또는 youtu.be/..."
+            className="ui-input flex-1"
+          />
+          <button type="button" onClick={loadYtThumbnail} className="ui-btn ui-btn--secondary shrink-0">
+            <LinkIcon size={14} /> 썸네일 불러오기
+          </button>
+        </div>
+        {ytThumbnailError && <p className="text-sm text-rose-600">유효한 유튜브 영상 URL을 입력해주세요.</p>}
+
+        {ytThumbnailUrl && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">해당 영상 썸네일</p>
+            <div className="inline-block rounded-2xl border-2 border-slate-200 overflow-hidden bg-slate-100 max-w-md">
+              <img
+                src={ytThumbnailUrl}
+                alt="유튜브 썸네일"
+                className="aspect-video w-full object-cover block"
+                onError={() => { setYtThumbnailUrl(null); setYtThumbnailError(true); }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleBenchmark}
+              disabled={isBenchmarking}
+              className="ui-btn ui-btn--primary"
+            >
+              {isBenchmarking ? (
+                <><Loader2 size={14} className="animate-spin" /> 벤치마킹 생성 중...</>
+              ) : (
+                <><BarChart3 size={14} /> 썸네일 벤치마킹하기</>
+              )}
+            </button>
+            {benchmarkSummary && (
+              <div className="ui-card--muted text-sm text-slate-700 p-3 rounded-xl">
+                {benchmarkSummary}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="ui-card space-y-4">
+        <span className="ui-label">썸네일 후보</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {thumbnails.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => selectThumb(t.id)}
+              className={`rounded-2xl border-2 overflow-hidden text-left transition-all ${t.isSelected ? 'border-rose-500 ring-2 ring-rose-200' : 'border-slate-200 hover:border-slate-300'}`}
+            >
+              <div className="aspect-video bg-slate-100 flex items-center justify-center text-slate-400 font-medium text-sm overflow-hidden">
+                {t.imageUrl ? (
+                  <img src={t.imageUrl} alt={t.title} className="w-full h-full object-cover" />
+                ) : (
+                  t.imagePlaceholder
+                )}
+              </div>
+              <div className="p-3 space-y-1">
+                <p className="text-sm font-semibold text-slate-900">{t.title}</p>
+                <p className="text-xs text-rose-600">{t.ctrHint}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- [메인 레이아웃 쉘] ---
 const AppContent = ({ projectName }: { projectName: string }) => {
   const { currentStep, setCurrentStep, isLoading, setIsLoading, setDescriptionInput, setIsFileLoaded, isDevMode, setIsDevMode } = useGlobal();
@@ -1321,6 +1805,10 @@ const AppContent = ({ projectName }: { projectName: string }) => {
           {currentStep === 2 && <TopicGenerationStep showToast={showToast} />}
           {currentStep === 3 && <ScriptPlanningStep />}
           {currentStep === 4 && <ImageAndScriptStep showToast={showToast} />}
+          {currentStep === 5 && <VoiceStep />}
+          {currentStep === 6 && <VideoStep />}
+          {currentStep === 7 && <MetaStep showToast={showToast} />}
+          {currentStep === 8 && <ThumbnailStep showToast={showToast} />}
         </div>
       </main>
       
