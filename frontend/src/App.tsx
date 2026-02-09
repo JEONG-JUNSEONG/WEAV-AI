@@ -48,7 +48,7 @@ function AppContentInner() {
           }`}
         >
           {currentSession?.kind === 'studio' ? (
-            <StudioView projectName={currentSession.title} />
+            <StudioView key={currentSession.id} sessionId={currentSession.id} projectName={currentSession.title} />
           ) : (
             <div className="flex-1 flex overflow-hidden">
               <ChatView />

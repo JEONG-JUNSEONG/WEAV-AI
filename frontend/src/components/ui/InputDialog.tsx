@@ -26,10 +26,12 @@ export function InputDialog({
   const [value, setValue] = useState(defaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmingRef = useRef(false);
 
   useEffect(() => {
     if (open) {
       setValue(defaultValue);
+      confirmingRef.current = false;
       setTimeout(() => {
         inputRef.current?.focus();
         inputRef.current?.select();
@@ -43,18 +45,24 @@ export function InputDialog({
     if (e.target === e.currentTarget) onCancel();
   };
 
+  const runConfirmOnce = (val: string) => {
+    if (confirmingRef.current || !val.trim()) return;
+    confirmingRef.current = true;
+    onConfirm(val.trim());
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       onCancel();
     } else if (e.key === 'Enter' && value.trim()) {
-      onConfirm(value.trim());
+      e.preventDefault();
+      e.stopPropagation();
+      runConfirmOnce(value.trim());
     }
   };
 
   const handleConfirm = () => {
-    if (value.trim()) {
-      onConfirm(value.trim());
-    }
+    runConfirmOnce(value);
   };
 
   return (

@@ -51,6 +51,8 @@ export interface StudioGlobalContextType {
   setUrlAnalysisData: React.Dispatch<React.SetStateAction<any>>;
   isLoading: boolean;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  loadingMessage: string | null;
+  setLoadingMessage: React.Dispatch<React.SetStateAction<string | null>>;
   isDevMode: boolean;
   setIsDevMode: React.Dispatch<React.SetStateAction<boolean>>;
   videoFormat: string;

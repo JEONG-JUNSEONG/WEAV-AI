@@ -19,26 +19,43 @@ import {
   synthesizeMasterScript, splitScriptIntoScenes, generateSceneImage,
   analyzeReferenceImage, generateScenePrompt, generateMetaData, generateBenchmarkThumbnail
 } from '@/services/studio/geminiService';
+import { studioTts } from '@/services/studio/studioFalApi';
+import { fetchTrendingByCategory, formatTrendingGrowth, type TrendingItemWithCategory, type TrendTemplate } from '@/services/studio/trendingApi';
 
 // --- [전역 상태 관리] ---
 const GlobalContext = createContext<StudioGlobalContextType | undefined>(undefined);
 
-const GlobalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [activeTags, setActiveTags] = useState<string[]>([]);
-  const [urlInput, setUrlInput] = useState('');
+const STORAGE_KEY_PREFIX = 'weav_studio_pro_v12';
+
+function loadStoredStudio(storageKey: string): Record<string, unknown> | null {
+  try {
+    const s = localStorage.getItem(storageKey);
+    return s ? JSON.parse(s) : null;
+  } catch {
+    return null;
+  }
+}
+
+const GlobalProvider: React.FC<{ children: React.ReactNode; sessionId?: number }> = ({ children, sessionId }) => {
+  const storageKey = sessionId != null ? `${STORAGE_KEY_PREFIX}_${sessionId}` : STORAGE_KEY_PREFIX;
+  const stored = useMemo(() => loadStoredStudio(storageKey), [storageKey]);
+
+  const [currentStep, setCurrentStep] = useState<number>(() => (stored && typeof stored.currentStep === 'number') ? stored.currentStep : 1);
+  const [activeTags, setActiveTags] = useState<string[]>(() => Array.isArray(stored?.activeTags) ? stored.activeTags : []);
+  const [urlInput, setUrlInput] = useState(() => (typeof stored?.urlInput === 'string') ? stored.urlInput : '');
   const [urlAnalysisData, setUrlAnalysisData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [isDevMode, setIsDevMode] = useState(false);
-  const [videoFormat, setVideoFormat] = useState('9:16');
-  const [inputMode, setInputMode] = useState<'tag' | 'description'>('tag'); 
-  const [descriptionInput, setDescriptionInput] = useState('');
+  const [videoFormat, setVideoFormat] = useState(() => (typeof stored?.videoFormat === 'string') ? stored.videoFormat : '9:16');
+  const [inputMode, setInputMode] = useState<'tag' | 'description'>(() => (stored?.inputMode === 'tag' || stored?.inputMode === 'description') ? stored.inputMode : 'tag');
+  const [descriptionInput, setDescriptionInput] = useState(() => (typeof stored?.descriptionInput === 'string') ? stored.descriptionInput : '');
   const [isFileLoaded, setIsFileLoaded] = useState(false);
 
-  const [masterScript, setMasterScript] = useState('');
-  const [selectedStyle, setSelectedStyle] = useState('Realistic');
-  const [referenceImage, setReferenceImage] = useState('');
-  const [analyzedStylePrompt, setAnalyzedStylePrompt] = useState('');
+  const [masterScript, setMasterScript] = useState(() => (typeof stored?.masterScript === 'string') ? stored.masterScript : '');
+  const [selectedStyle, setSelectedStyle] = useState(() => (typeof stored?.selectedStyle === 'string') ? stored.selectedStyle : 'Realistic');
+  const [referenceImage, setReferenceImage] = useState(() => (typeof stored?.referenceImage === 'string') ? stored.referenceImage : '');
+  const [analyzedStylePrompt, setAnalyzedStylePrompt] = useState(() => (typeof stored?.analyzedStylePrompt === 'string') ? stored.analyzedStylePrompt : '');
 
   const [analysisResult, setAnalysisResult] = useState<StudioAnalysisResult>({
     niche: [],
@@ -49,61 +66,43 @@ const GlobalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =
     isUrlAnalyzing: false
   });
 
-  const [scenes, setScenes] = useState<StudioScene[]>([]);
+  const [scenes, setScenes] = useState<StudioScene[]>(() => Array.isArray(stored?.scenes) && stored.scenes.length > 0 ? stored.scenes as StudioScene[] : []);
   const [scriptSegments, setScriptSegments] = useState<StudioScriptSegment[]>([]);
-  const [generatedTopics, setGeneratedTopics] = useState<string[]>([]);
-  const [selectedTopic, setSelectedTopic] = useState('');
+  const [generatedTopics, setGeneratedTopics] = useState<string[]>(() => Array.isArray(stored?.generatedTopics) ? stored.generatedTopics : []);
+  const [selectedTopic, setSelectedTopic] = useState(() => (typeof stored?.selectedTopic === 'string') ? stored.selectedTopic : '');
   const [referenceScript, setReferenceScript] = useState('');
-  const [scriptStyle, setScriptStyle] = useState('type-a');
-  const [scriptLength, setScriptLength] = useState('short');
-  const [planningData, setPlanningData] = useState<StudioScriptPlanningData>({
-    contentType: '',
-    summary: '',
-    opening: '',
-    body: '',
-    climax: '',
-    outro: '',
-    targetDuration: '1m'
+  const [scriptStyle, setScriptStyle] = useState(() => (typeof stored?.scriptStyle === 'string') ? stored.scriptStyle : 'type-a');
+  const [scriptLength, setScriptLength] = useState(() => (typeof stored?.scriptLength === 'string') ? stored.scriptLength : 'short');
+  const [planningData, setPlanningData] = useState<StudioScriptPlanningData>(() => {
+    const def = { contentType: '', summary: '', opening: '', body: '', climax: '', outro: '', targetDuration: '1m' as string };
+    if (stored?.planningData && typeof stored.planningData === 'object' && !Array.isArray(stored.planningData)) {
+      const p = stored.planningData as Record<string, unknown>;
+      return {
+        contentType: typeof p.contentType === 'string' ? p.contentType : def.contentType,
+        summary: typeof p.summary === 'string' ? p.summary : def.summary,
+        opening: typeof p.opening === 'string' ? p.opening : def.opening,
+        body: typeof p.body === 'string' ? p.body : def.body,
+        climax: typeof p.climax === 'string' ? p.climax : def.climax,
+        outro: typeof p.outro === 'string' ? p.outro : def.outro,
+        targetDuration: typeof p.targetDuration === 'string' ? p.targetDuration : def.targetDuration
+      };
+    }
+    return def;
   });
 
   useEffect(() => {
-    const saved = localStorage.getItem('weav_studio_pro_v12');
-    if (saved) {
-      try {
-        const p = JSON.parse(saved);
-        setActiveTags(p.activeTags || []);
-        setUrlInput(p.urlInput || '');
-        setVideoFormat(p.videoFormat || '9:16');
-        setInputMode(p.inputMode || 'tag');
-        setDescriptionInput(p.descriptionInput || '');
-        if (p.scenes) setScenes(p.scenes);
-        if (p.scriptStyle) setScriptStyle(p.scriptStyle);
-        if (p.scriptLength) setScriptLength(p.scriptLength);
-        if (p.planningData) setPlanningData(p.planningData);
-        if (p.currentStep) setCurrentStep(p.currentStep);
-        if (p.selectedTopic) setSelectedTopic(p.selectedTopic);
-        if (p.generatedTopics) setGeneratedTopics(p.generatedTopics);
-        if (p.masterScript) setMasterScript(p.masterScript);
-        if (p.selectedStyle) setSelectedStyle(p.selectedStyle);
-        if (p.referenceImage) setReferenceImage(p.referenceImage);
-        if (p.analyzedStylePrompt) setAnalyzedStylePrompt(p.analyzedStylePrompt);
-      } catch (e) { console.error("Restore Error"); }
-    }
-  }, []);
-
-  useEffect(() => {
-    const data = { 
-      currentStep, activeTags, urlInput, videoFormat, inputMode, 
-      descriptionInput, scenes, scriptStyle, scriptLength, planningData, 
-      selectedTopic, generatedTopics, masterScript, selectedStyle, 
-      referenceImage, analyzedStylePrompt 
+    const data = {
+      currentStep, activeTags, urlInput, videoFormat, inputMode,
+      descriptionInput, scenes, scriptStyle, scriptLength, planningData,
+      selectedTopic, generatedTopics, masterScript, selectedStyle,
+      referenceImage, analyzedStylePrompt
     };
-    localStorage.setItem('weav_studio_pro_v12', JSON.stringify(data));
-  }, [currentStep, activeTags, urlInput, videoFormat, inputMode, descriptionInput, scenes, scriptStyle, scriptLength, planningData, selectedTopic, generatedTopics, masterScript, selectedStyle, referenceImage, analyzedStylePrompt]);
+    localStorage.setItem(storageKey, JSON.stringify(data));
+  }, [storageKey, currentStep, activeTags, urlInput, videoFormat, inputMode, descriptionInput, scenes, scriptStyle, scriptLength, planningData, selectedTopic, generatedTopics, masterScript, selectedStyle, referenceImage, analyzedStylePrompt]);
 
   const value = {
     currentStep, setCurrentStep, activeTags, setActiveTags, urlInput, setUrlInput, urlAnalysisData, setUrlAnalysisData,
-    isLoading, setIsLoading, isDevMode, setIsDevMode, videoFormat, setVideoFormat,
+    isLoading, setIsLoading, loadingMessage, setLoadingMessage, isDevMode, setIsDevMode, videoFormat, setVideoFormat,
     analysisResult, setAnalysisResult, inputMode, setInputMode, descriptionInput, setDescriptionInput,
     scenes, setScenes, scriptSegments, setScriptSegments,
     generatedTopics, setGeneratedTopics, selectedTopic, setSelectedTopic, referenceScript, setReferenceScript,
@@ -300,44 +299,102 @@ const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean, toggleSidebar: ()
 const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) => {
   const { 
     activeTags, setActiveTags, analysisResult, setAnalysisResult, inputMode, setInputMode, descriptionInput, setDescriptionInput,
-    videoFormat, setVideoFormat, urlInput, setUrlInput, setGeneratedTopics, urlAnalysisData, setIsLoading, isFileLoaded, setUrlAnalysisData, setCurrentStep
+    videoFormat, setVideoFormat, urlInput, setUrlInput, setGeneratedTopics, urlAnalysisData, setUrlAnalysisData, isFileLoaded, setCurrentStep
   } = useGlobal();
-  
-  const [templateMode, setTemplateMode] = useState<'mainstream' | 'niche'>('mainstream');
 
+  const [isTopicGenerating, setIsTopicGenerating] = useState(false);
+  const [selectedBenchmarkPatterns, setSelectedBenchmarkPatterns] = useState<string[]>([]);
+
+  const [templateMode, setTemplateMode] = useState<'mainstream' | 'niche'>('mainstream');
+  const [trendDisplayFilter, setTrendDisplayFilter] = useState<TrendTemplate>('all');
+  const [trendPeriod, setTrendPeriod] = useState<'monthly' | 'weekly'>('monthly');
+  const [trendDataRaw, setTrendDataRaw] = useState<TrendingItemWithCategory[] | null>(null);
+  const [trendError, setTrendError] = useState<string | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+
+  // 인기 카테고리: YouTube 공식 video category 한글 표기 (categoryId 기준)
   const mainstreamCategories = [
-    { name: '뉴스/시사', icon: <Globe size={20} />, color: 'bg-blue-50 text-blue-600' },
-    { name: '여행/투어', icon: <Map size={20} />, color: 'bg-sky-50 text-sky-600' },
-    { name: '요리/맛집', icon: <Utensils size={20} />, color: 'bg-rose-50 text-rose-600' },
-    { name: '일상/브이로그', icon: <Camera size={20} />, color: 'bg-indigo-50 text-indigo-600' },
-    { name: '과학/지식', icon: <Microscope size={20} />, color: 'bg-emerald-50 text-emerald-600' },
-    { name: '영화/드라마', icon: <Film size={20} />, color: 'bg-pink-50 text-pink-600' },
-    { name: 'IT/리뷰', icon: <Gift size={20} />, color: 'bg-amber-50 text-amber-600' },
-    { name: '자기계발', icon: <Activity size={20} />, color: 'bg-green-50 text-green-600' },
+    { name: '뉴스/정치', icon: <Globe size={20} />, color: 'bg-blue-50 text-blue-600', categoryId: '25' },
+    { name: '여행/이벤트', icon: <Map size={20} />, color: 'bg-sky-50 text-sky-600', categoryId: '19' },
+    { name: '팁/스타일', icon: <Utensils size={20} />, color: 'bg-rose-50 text-rose-600', categoryId: '26' },
+    { name: '사람/블로그', icon: <Camera size={20} />, color: 'bg-indigo-50 text-indigo-600', categoryId: '22' },
+    { name: '과학/기술', icon: <Microscope size={20} />, color: 'bg-emerald-50 text-emerald-600', categoryId: '28' },
+    { name: '영화/애니메이션', icon: <Film size={20} />, color: 'bg-pink-50 text-pink-600', categoryId: '1' },
+    { name: '엔터테인먼트', icon: <Gift size={20} />, color: 'bg-amber-50 text-amber-600', categoryId: '24' },
+    { name: '교육', icon: <Activity size={20} />, color: 'bg-green-50 text-green-600', categoryId: '27' },
   ];
 
   const nicheCategories = [
-    { name: '미스터리', icon: <Ghost size={20} />, color: 'bg-slate-900 text-white' },
-    { name: '전문가 노하우', icon: <PenTool size={20} />, color: 'bg-slate-50 text-slate-600' },
-    { name: '오프그리드', icon: <Leaf size={20} />, color: 'bg-emerald-50 text-emerald-600' },
-    { name: '골동품 복원', icon: <Settings2 size={20} />, color: 'bg-blue-50 text-blue-600' },
-    { name: '밀리터리', icon: <Sword size={20} />, color: 'bg-indigo-50 text-indigo-600' },
-    { name: '심리 상담', icon: <Heart size={20} />, color: 'bg-rose-50 text-rose-600' },
-    { name: '아카이브/역사', icon: <History size={20} />, color: 'bg-amber-50 text-amber-600' },
-    { name: '로컬 탐방', icon: <Compass size={20} />, color: 'bg-sky-50 text-sky-600' },
+    { name: '미스터리', icon: <Ghost size={20} />, color: 'bg-slate-900 text-white', categoryId: '24' },
+    { name: '전문가 노하우', icon: <PenTool size={20} />, color: 'bg-slate-50 text-slate-600', categoryId: '27' },
+    { name: '오프그리드', icon: <Leaf size={20} />, color: 'bg-emerald-50 text-emerald-600', categoryId: '28' },
+    { name: '골동품 복원', icon: <Settings2 size={20} />, color: 'bg-blue-50 text-blue-600', categoryId: '26' },
+    { name: '밀리터리', icon: <Sword size={20} />, color: 'bg-indigo-50 text-indigo-600', categoryId: '20' },
+    { name: '심리 상담', icon: <Heart size={20} />, color: 'bg-rose-50 text-rose-600', categoryId: '22' },
+    { name: '아카이브/역사', icon: <History size={20} />, color: 'bg-amber-50 text-amber-600', categoryId: '27' },
+    { name: '로컬 탐방', icon: <Compass size={20} />, color: 'bg-sky-50 text-sky-600', categoryId: '19' },
   ];
 
   const categories = templateMode === 'mainstream' ? mainstreamCategories : nicheCategories;
+  const selectedCategoryIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const name of activeTags) {
+      const c = categories.find((cat) => cat.name === name && 'categoryId' in cat);
+      if (c && 'categoryId' in c) ids.add((c as { categoryId: string }).categoryId);
+    }
+    return ids;
+  }, [activeTags, categories]);
+
+  const categoryFilterKey = useMemo(
+    () => Array.from(selectedCategoryIds).sort().join(','),
+    [selectedCategoryIds]
+  );
+
+  useEffect(() => {
+    if (selectedCategoryIds.size === 0) {
+      setTrendDataRaw(null);
+      setTrendError(null);
+      setTrendLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const ids = Array.from(selectedCategoryIds);
+    setTrendLoading(true);
+    setTrendError(null);
+    fetchTrendingByCategory(ids)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.error) setTrendError(res.error);
+        if (res.items?.length) {
+          const sorted = [...res.items].sort((a, b) => (b.viewCount ?? 0) - (a.viewCount ?? 0));
+          setTrendDataRaw(sorted);
+        } else {
+          setTrendDataRaw(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTrendDataRaw(null);
+        setTrendError('트렌드를 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (!cancelled) setTrendLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [categoryFilterKey]);
+
+  const trendDisplayLists = useMemo(() => {
+    if (!trendDataRaw?.length) return { weekly: [], monthly: [] };
+    const sorted = [...trendDataRaw].sort((a, b) => (b.viewCount ?? 0) - (a.viewCount ?? 0));
+    const mid = Math.ceil(sorted.length / 2);
+    return {
+      weekly: sorted.slice(0, mid),
+      monthly: sorted.slice(mid),
+    };
+  }, [trendDataRaw]);
+
   const formatOptions = [
     { id: '9:16', label: '세로형', sub: 'Shorts / Reels', icon: <Smartphone size={16} /> },
     { id: '16:9', label: '가로형', sub: 'YouTube / Standard', icon: <Monitor size={16} /> }
-  ];
-
-  const viralTrends = [
-    { name: "두바이 초콜릿 제작기", growth: "+1,240%", color: "text-amber-600" },
-    { name: "데스크테리어 ASMR", growth: "+850%", color: "text-rose-600" },
-    { name: "1인칭 시점 숏무비", growth: "+620%", color: "text-indigo-600" },
-    { name: "Y2K 레트로 편집법", growth: "+430%", color: "text-emerald-600" }
   ];
 
   const runTopicAnalysis = async () => {
@@ -375,6 +432,8 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
         niche: [result.summary, ...result.patterns.slice(0, 2)],
         trending: ["벤치마킹 데이터 로드 완료"]
       }));
+      setSelectedBenchmarkPatterns([]);
+      showToast("패턴 분석이 완료되었습니다. 패턴을 클릭해 선택한 뒤 주제 생성하기를 누르세요.");
     } catch (e) {
       setAnalysisResult(p => ({ ...p, isUrlAnalyzing: false, error: "분석 실패" }));
       showToast("URL 분석에 실패했습니다.");
@@ -382,22 +441,30 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
   };
 
   const handleStartTopicGen = async () => {
-    if (activeTags.length === 0 && !descriptionInput) return showToast("기획 정보를 입력해주세요.");
-    setIsLoading(true);
+    if (activeTags.length === 0 && !descriptionInput.trim()) return showToast("기획 정보를 입력해주세요.");
+    setIsTopicGenerating(true);
     try {
-      const res = await generateTopics({ tags: activeTags, description: descriptionInput, urlData: urlAnalysisData });
+      const urlData = urlAnalysisData
+        ? {
+            summary: urlAnalysisData.summary,
+            patterns: selectedBenchmarkPatterns.length > 0 ? selectedBenchmarkPatterns : urlAnalysisData.patterns,
+          }
+        : null;
+      const res = await generateTopics({ tags: activeTags, description: descriptionInput, urlData });
       setGeneratedTopics(res.topics);
       setCurrentStep(2);
     } catch (e) {
       showToast("주제 생성 실패.");
     } finally {
-      setIsLoading(false);
+      setIsTopicGenerating(false);
     }
   };
 
-  const confidenceValue = typeof analysisResult.confidence === 'number'
-    ? analysisResult.confidence
-    : parseInt(String(analysisResult.confidence), 10) || 0;
+  const toggleBenchmarkPattern = (pattern: string) => {
+    setSelectedBenchmarkPatterns((prev) =>
+      prev.includes(pattern) ? prev.filter((p) => p !== pattern) : [...prev, pattern]
+    );
+  };
 
   return (
     <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
@@ -445,8 +512,8 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
                 <div className="wf-subhead">
                   <span>시장 카테고리</span>
                   <div className="planner-toggle">
-                    <button onClick={() => setTemplateMode('mainstream')} className={`planner-toggle__item ${templateMode === 'mainstream' ? 'is-active' : ''}`}>인기</button>
-                    <button onClick={() => setTemplateMode('niche')} className={`planner-toggle__item ${templateMode === 'niche' ? 'is-active' : ''}`}>틈새</button>
+                    <button onClick={() => { setTemplateMode('mainstream'); setTrendDisplayFilter('mainstream'); }} className={`planner-toggle__item ${templateMode === 'mainstream' ? 'is-active' : ''}`}>인기</button>
+                    <button onClick={() => { setTemplateMode('niche'); setTrendDisplayFilter('niche'); }} className={`planner-toggle__item ${templateMode === 'niche' ? 'is-active' : ''}`}>틈새</button>
                   </div>
                 </div>
                 <div className="planner-chips">
@@ -475,23 +542,21 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
                 <button onClick={() => setInputMode('description')} className={`planner-tab ${inputMode === 'description' ? 'is-active' : ''}`}>설명</button>
               </div>
             </div>
-            {inputMode === 'tag' ? (
-              <StandardTagInput />
-            ) : (
-              <div className="space-y-3">
-                {isFileLoaded && <span className="ui-badge"><FileText size={12} /> 파일 데이터 로드됨</span>}
-                <AutoResizeTextarea
-                  value={descriptionInput}
-                  onChange={setDescriptionInput}
-                  placeholder="영상 기획 내용을 자유롭게 입력하세요."
-                  className="min-h-[120px]"
-                />
-              </div>
-            )}
-            <button onClick={runTopicAnalysis} disabled={analysisResult?.isAnalyzing} className="wf-primary">
-              {analysisResult?.isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-              기획 데이터 분석
-            </button>
+            <div className="mb-3">
+              {inputMode === 'tag' ? (
+                <StandardTagInput />
+              ) : (
+                <div className="space-y-3">
+                  {isFileLoaded && <span className="ui-badge"><FileText size={12} /> 파일 데이터 로드됨</span>}
+                  <AutoResizeTextarea
+                    value={descriptionInput}
+                    onChange={setDescriptionInput}
+                    placeholder="영상 기획 내용을 자유롭게 입력하세요."
+                    className="min-h-[120px]"
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="wf-panel">
@@ -502,77 +567,96 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
             </div>
             <div className="wf-inline">
               <input type="text" value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="참고할 유튜브 주소를 입력하세요..." className="ui-input" />
-              <button onClick={() => runUrlAnalysis(urlInput)} className="wf-secondary">패턴 분석</button>
+              <button onClick={() => runUrlAnalysis(urlInput)} disabled={analysisResult.isUrlAnalyzing} className="wf-secondary">
+                {analysisResult.isUrlAnalyzing ? <><Loader2 size={14} className="animate-spin" /> 패턴 분석 중...</> : '패턴 분석'}
+              </button>
             </div>
+            {urlAnalysisData && (
+              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                  패턴 분석 결과
+                </div>
+                {urlAnalysisData.summary && (
+                  <div>
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">요약</span>
+                    <p className="mt-1 text-sm text-slate-800">{urlAnalysisData.summary}</p>
+                  </div>
+                )}
+                {urlAnalysisData.patterns?.length > 0 && (
+                  <div>
+                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">패턴 (클릭하여 선택 후 주제 생성 시 반영)</span>
+                    <ul className="mt-1 flex flex-wrap gap-2">
+                      {urlAnalysisData.patterns.map((p: string, i: number) => {
+                        const isSelected = selectedBenchmarkPatterns.includes(p);
+                        return (
+                          <li key={i}>
+                            <button
+                              type="button"
+                              onClick={() => toggleBenchmarkPattern(p)}
+                              className={`px-2.5 py-1 rounded-md border text-sm transition-colors ${
+                                isSelected
+                                  ? 'bg-slate-200 border-slate-500 text-slate-900'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+            <button onClick={handleStartTopicGen} disabled={isTopicGenerating} className="wf-primary w-full mt-4">
+              {isTopicGenerating ? <><Loader2 size={16} className="animate-spin" /> 주제 생성 중...</> : <><Sparkles size={16} /> 주제 생성하기</>}
+            </button>
           </div>
         </div>
 
         <div className="col-span-12 lg:col-span-5 space-y-6">
-          <div className="wf-panel wf-panel--run space-y-5 relative">
-            {analysisResult?.isAnalyzing && (
-              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center rounded-2xl">
-                <Loader2 size={24} className="animate-spin text-rose-600" />
-              </div>
-            )}
-            <div className="wf-header">
-              <div>
-                <span className="wf-label">Workflow</span>
-                <div className="wf-title">Ideation Run</div>
-              </div>
-              <div className="wf-score">
-                <span className="wf-score__value">{analysisResult?.confidence}</span>
-                <span className="wf-score__label">Confidence</span>
-              </div>
-            </div>
-            <div className="wf-progress">
-              <div className="wf-progress__bar" style={{ width: `${Math.min(confidenceValue, 100)}%` }} />
-            </div>
-            <div className="wf-list max-h-[320px] overflow-y-auto scrollbar-hide">
-              {analysisResult?.niche?.length > 0 ? (
-                <>
-                  <div className="wf-node wf-node--active">
-                    <div className="wf-node__left">
-                      <span className="wf-node__dot" />
-                      <span>전략 인사이트 생성</span>
-                    </div>
-                    <span className="wf-node__status">Running</span>
-                  </div>
-                  {analysisResult.niche.map((v: any, i: number) => (
-                    <div key={i} className="wf-node">
-                      <div className="wf-node__left">
-                        <span className="wf-node__dot wf-node__dot--muted" />
-                        <span>{String(v)}</span>
-                      </div>
-                      <span className="wf-node__status">Ready</span>
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <div className="wf-empty">
-                  <Search size={16} /> 분석 결과가 여기에 표시됩니다.
-                </div>
-              )}
-            </div>
-            <button onClick={handleStartTopicGen} disabled={analysisResult?.niche?.length === 0} className="wf-primary">
-              주제 생성하기 <ChevronRight size={16} />
-            </button>
-          </div>
-
           <div className="wf-panel">
-            <div className="flex items-center gap-2">
-              <TrendingUp size={16} />
-              <span className="wf-label">Trend Signals</span>
+            <div className="wf-panel__header">
+              <div className="flex items-center gap-2">
+                <TrendingUp size={16} />
+                <span className="wf-label">Trend Signals</span>
+              </div>
+              <div className="planner-tabs">
+                <button onClick={() => setTrendPeriod('monthly')} className={`planner-tab ${trendPeriod === 'monthly' ? 'is-active' : ''}`}>월간</button>
+                <button onClick={() => setTrendPeriod('weekly')} className={`planner-tab ${trendPeriod === 'weekly' ? 'is-active' : ''}`}>일주일간</button>
+              </div>
             </div>
-            <div className="wf-list text-sm">
-              {viralTrends.map((trend, idx) => (
-                <div key={idx} className="wf-node wf-node--compact">
-                  <div className="wf-node__left">
-                    <span className="wf-node__dot wf-node__dot--muted" />
-                    <span>{trend.name}</span>
-                  </div>
-                  <span className="wf-node__status">{trend.growth}</span>
+            <div className="wf-list text-sm max-h-[420px] overflow-y-auto">
+              {trendLoading ? (
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <Loader2 size={20} className="animate-spin" />
                 </div>
-              ))}
+              ) : (() => {
+                const list = trendPeriod === 'monthly' ? trendDisplayLists.monthly : trendDisplayLists.weekly;
+                if (!list.length) {
+                  const msg = trendError
+                    ? (trendError.includes('YOUTUBE_API_KEY') ? 'YouTube API 키가 설정되지 않았습니다. (backend .env 또는 infra/.env)' : trendError)
+                    : selectedCategoryIds.size === 0
+                      ? '시장 카테고리를 선택하면 트렌드를 불러옵니다.'
+                      : '선택한 카테고리에 해당하는 트렌드가 없습니다.';
+                  return (
+                    <div className="wf-empty py-8 text-muted-foreground text-center text-sm">
+                      {msg}
+                    </div>
+                  );
+                }
+                return list.map((trend, idx) => (
+                  <div key={idx} className="wf-node wf-node--compact">
+                    <div className="wf-node__left">
+                      <span className="wf-node__dot wf-node__dot--muted" />
+                      <span>{trend.name}</span>
+                    </div>
+                    <span className="wf-node__status">{formatTrendingGrowth(trend)}</span>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         </div>
@@ -642,13 +726,16 @@ const TopicGenerationStep = ({ showToast }: { showToast: (msg: string) => void }
 const ScriptPlanningStep = () => {
   const { 
     selectedTopic, scriptStyle, setScriptStyle, scriptLength, setScriptLength,
-    planningData, setPlanningData, setCurrentStep, setIsLoading, setScenes,
+    planningData, setPlanningData, setCurrentStep,
     masterScript, setMasterScript
   } = useGlobal();
 
   const [activeSubStep, setActiveSubStep] = useState(1);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [reviewMode, setReviewMode] = useState<'architecture' | 'script'>('architecture'); 
+  const [reviewMode, setReviewMode] = useState<'architecture' | 'script'>('architecture');
+  const [loadingStepKey, setLoadingStepKey] = useState<string | null>(null);
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [synthesizeProgress, setSynthesizeProgress] = useState<string | null>(null); 
 
   const archetypes = [
     { id: 'type-a', name: '내러티브 중심형', desc: '이야기의 흐름을 따라가는 몰입형 스토리', icon: <AlignLeft size={18} /> },
@@ -687,15 +774,33 @@ const ScriptPlanningStep = () => {
   };
 
   const runStepAI = async (key: string, name: string) => {
-    setIsLoading(true);
+    setLoadingStepKey(key);
     try {
       const res = await generatePlanningStep(name, { topic: selectedTopic, style: scriptStyle, length: scriptLength, planningData });
       setPlanningData(p => ({ ...p, [key]: res.result }));
-    } finally { setIsLoading(false); }
+    } finally {
+      setLoadingStepKey(null);
+    }
+  };
+
+  const runAllStepsAI = async () => {
+    setIsGeneratingAll(true);
+    try {
+      for (let i = 0; i < steps.length; i++) {
+        const { id, key, name } = steps[i];
+        setActiveSubStep(id);
+        setLoadingStepKey(key);
+        const res = await generatePlanningStep(name, { topic: selectedTopic, style: scriptStyle, length: scriptLength, planningData });
+        setPlanningData(p => ({ ...p, [key]: res.result }));
+      }
+    } finally {
+      setLoadingStepKey(null);
+      setIsGeneratingAll(false);
+    }
   };
 
   const handleSynthesizeScript = async () => {
-    setIsLoading(true);
+    setSynthesizeProgress('통합 시나리오 생성 중...');
     try {
       const res = await synthesizeMasterScript({ 
         topic: selectedTopic, 
@@ -707,7 +812,7 @@ const ScriptPlanningStep = () => {
     } catch (e) {
       console.error(e);
     } finally {
-      setIsLoading(false);
+      setSynthesizeProgress(null);
     }
   };
 
@@ -767,8 +872,8 @@ const ScriptPlanningStep = () => {
             </div>
 
             {reviewMode === 'architecture' ? (
-              <button onClick={handleSynthesizeScript} className="ui-btn ui-btn--primary w-full">
-                통합 시나리오 생성하기 <Sparkles size={16} />
+              <button onClick={handleSynthesizeScript} disabled={!!synthesizeProgress} className="ui-btn ui-btn--primary w-full">
+                {synthesizeProgress ? <><Loader2 size={16} className="animate-spin" /> {synthesizeProgress}</> : <>통합 시나리오 생성하기 <Sparkles size={16} /></>}
               </button>
             ) : (
               <div className="flex flex-col sm:flex-row gap-3">
@@ -850,9 +955,26 @@ const ScriptPlanningStep = () => {
                   {steps[activeSubStep - 1].name.replace(/^\d+\)\s/, '')}
                 </h3>
               </div>
-              <button onClick={() => runStepAI(steps[activeSubStep - 1].key, steps[activeSubStep - 1].name)} className="ui-btn ui-btn--secondary">
-                <Sparkles size={16} /> AI 초안
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => runStepAI(steps[activeSubStep - 1].key, steps[activeSubStep - 1].name)}
+                  disabled={!!loadingStepKey || isGeneratingAll}
+                  className="ui-btn ui-btn--secondary"
+                >
+                  {loadingStepKey === steps[activeSubStep - 1].key ? <><Loader2 size={16} className="animate-spin" /> AI 초안 생성 중...</> : <><Sparkles size={16} /> AI 초안</>}
+                </button>
+                <button
+                  onClick={runAllStepsAI}
+                  disabled={!!loadingStepKey || isGeneratingAll}
+                  className="ui-btn ui-btn--primary"
+                >
+                  {isGeneratingAll ? (
+                    <><Loader2 size={16} className="animate-spin" /> 전체 생성 중 {loadingStepKey ? `(${steps.findIndex(s => s.key === loadingStepKey) + 1}/${steps.length})` : ''}...</>
+                  ) : (
+                    <><Zap size={16} /> 전체 생성</>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="ui-card--muted text-sm text-slate-700">
@@ -896,11 +1018,15 @@ const ScriptPlanningStep = () => {
 // --- [Step 4: 이미지 및 대본 생성] ---
 const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void }) => {
   const { 
-    masterScript, scenes, setScenes, setIsLoading, selectedStyle, setSelectedStyle, videoFormat,
+    masterScript, scenes, setScenes, selectedStyle, setSelectedStyle, videoFormat,
     referenceImage, setReferenceImage, analyzedStylePrompt, setAnalyzedStylePrompt
   } = useGlobal();
 
   const [isImgDragging, setIsImgDragging] = useState(false);
+  const [isSplitting, setIsSplitting] = useState(false);
+  const [isRefAnalyzing, setIsRefAnalyzing] = useState(false);
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const styleLab = [
@@ -971,9 +1097,9 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
 
   const handleStudioSceneSplitting = async () => {
     if (!masterScript) return showToast("시나리오 데이터가 없습니다. 3단계에서 시나리오를 먼저 생성하세요.");
-    setIsLoading(true);
+    setIsSplitting(true);
     try {
-      const splitRes = await splitScriptIntoStudioScenes(masterScript);
+      const splitRes = await splitScriptIntoScenes(masterScript);
       const mapped = splitRes.map((s: any, i: number) => ({
         id: Date.now() + i,
         narrative: s.script_segment,
@@ -986,11 +1112,18 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
         isGenerating: false
       }));
       setScenes(mapped);
-      showToast("전문가급 씬 매핑이 완료되었습니다.");
+
+      const styleObj = styleLab.find(s => s.id === selectedStyle);
+      for (let i = 0; i < mapped.length; i++) {
+        const prompt = await generateScenePrompt(mapped[i].narrative, styleObj?.desc || '', analyzedStylePrompt);
+        mapped[i].aiPrompt = prompt;
+      }
+      setScenes([...mapped]);
+      showToast("전문가급 씬 매핑 및 프롬프트 정밀화가 완료되었습니다.");
     } catch (e) {
       showToast("시나리오 분석 실패.");
     } finally {
-      setIsLoading(false);
+      setIsSplitting(false);
     }
   };
 
@@ -999,13 +1132,13 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
     reader.onload = async (e) => {
       const base64 = e.target?.result as string;
       setReferenceImage(base64);
-      setIsLoading(true);
+      setIsRefAnalyzing(true);
       try {
         const styleText = await analyzeReferenceImage(base64);
         setAnalyzedStylePrompt(styleText);
         showToast("레퍼런스 이미지 스타일 분석 완료.");
       } finally {
-        setIsLoading(false);
+        setIsRefAnalyzing(false);
       }
     };
     reader.readAsDataURL(file);
@@ -1027,28 +1160,14 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
     showToast("새 장면이 추가되었습니다.");
   };
 
-  const refinePrompt = async (idx: number) => {
-    const scene = scenes[idx];
-    const styleObj = styleLab.find(s => s.id === selectedStyle);
-    setIsLoading(true);
-    try {
-      const prompt = await generateStudioScenePrompt(scene.narrative, styleObj?.desc || '', analyzedStylePrompt);
-      const next = [...scenes];
-      next[idx].aiPrompt = prompt;
-      setScenes(next);
-      showToast(`${idx+1}번 장면 프롬프트 정밀화 완료.`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleGenImage = async (idx: number) => {
     const scene = scenes[idx];
+    const styleObj = styleLab.find(s => s.id === selectedStyle);
     const next = [...scenes];
     next[idx].isGenerating = true;
     setScenes(next);
     try {
-      const url = await generateStudioSceneImage(scene.aiPrompt, selectedStyle, videoFormat as any);
+      const url = await generateSceneImage(scene.aiPrompt, selectedStyle, videoFormat as '9:16' | '16:9', styleObj?.model);
       const updated = [...scenes];
       updated[idx].imageUrl = url;
       updated[idx].isGenerating = false;
@@ -1064,11 +1183,19 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
 
   const generateAll = async () => {
     if (scenes.length === 0) return;
+    const toGenerate = scenes.map((s, i) => i).filter(i => !scenes[i].imageUrl);
+    if (toGenerate.length === 0) return showToast("생성할 이미지가 없습니다.");
+    setIsGeneratingAll(true);
+    setGenerateAllProgress(`(0/${toGenerate.length})`);
     showToast("모든 이미지를 순차적으로 생성합니다...");
-    for (let i = 0; i < scenes.length; i++) {
-      if (!scenes[i].imageUrl) {
-        await handleGenImage(i);
+    try {
+      for (let i = 0; i < toGenerate.length; i++) {
+        setGenerateAllProgress(`(${i + 1}/${toGenerate.length})`);
+        await handleGenImage(toGenerate[i]);
       }
+    } finally {
+      setIsGeneratingAll(false);
+      setGenerateAllProgress(null);
     }
   };
 
@@ -1080,11 +1207,11 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
         subtitle="장면 단위로 시각적 연출과 프롬프트를 정리합니다."
         right={(
           <div className="flex flex-wrap gap-2">
-            <button onClick={handleStudioSceneSplitting} className="ui-btn ui-btn--secondary">
-              <ScanLine size={16} /> 대본 분할
+            <button onClick={handleStudioSceneSplitting} disabled={isSplitting || isGeneratingAll} className="ui-btn ui-btn--secondary">
+              {isSplitting ? <><Loader2 size={16} className="animate-spin" /> 대본 분할 중...</> : <><ScanLine size={16} /> 대본 분할</>}
             </button>
-            <button onClick={generateAll} className="ui-btn ui-btn--primary">
-              <Zap size={16} /> 전체 생성
+            <button onClick={generateAll} disabled={isSplitting || isGeneratingAll} className="ui-btn ui-btn--primary">
+              {isGeneratingAll ? <><Loader2 size={16} className="animate-spin" /> 전체 생성 중 {generateAllProgress}...</> : <><Zap size={16} /> 전체 생성</>}
             </button>
           </div>
         )}
@@ -1115,7 +1242,9 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
           <div className="ui-card space-y-4">
             <div className="flex items-center justify-between">
               <span className="ui-label">레퍼런스</span>
-              <button onClick={() => fileInputRef.current?.click()} className="ui-btn ui-btn--secondary">업로드</button>
+              <button onClick={() => fileInputRef.current?.click()} disabled={isRefAnalyzing} className="ui-btn ui-btn--secondary">
+                {isRefAnalyzing ? <><Loader2 size={14} className="animate-spin" /> 분석 중...</> : '업로드'}
+              </button>
             </div>
             <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && handleImgUpload(e.target.files[0])} accept="image/*" />
             <div
@@ -1156,9 +1285,6 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
                 <div className="flex items-center justify-between">
                   <span className="ui-label">StudioScene {String(idx + 1).padStart(2, '0')}</span>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => refinePrompt(idx)} className="ui-btn ui-btn--secondary">
-                      <Wand2 size={14} /> 프롬프트 정밀화
-                    </button>
                     <button onClick={() => setScenes(scenes.filter(s => s.id !== scene.id))} className="ui-btn ui-btn--ghost">
                       <Trash2 size={14} />
                     </button>
@@ -1201,7 +1327,7 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
                       )}
                     </div>
                     <button onClick={() => handleGenImage(idx)} disabled={scene.isGenerating} className="ui-btn ui-btn--primary w-full">
-                      <Wand2 size={14} /> {styleLab.find(s => s.id === selectedStyle)?.name} 생성
+                      {scene.isGenerating ? <><Loader2 size={14} className="animate-spin" /> 생성 중...</> : <><Wand2 size={14} /> {styleLab.find(s => s.id === selectedStyle)?.name} 생성</>}
                     </button>
                   </div>
                 </div>
@@ -1218,21 +1344,23 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
   );
 };
 
-// --- [목업: Step 5~8 공통 목업 데이터] ---
-const MOCK_VOICES = [
-  { id: 'ko-female-1', name: '한국어 여성 (밝은 톤)', lang: 'ko', gender: 'F', sample: '안녕하세요. 오늘 영상도 재미있게 봐 주세요.' },
-  { id: 'ko-male-1', name: '한국어 남성 (차분)', lang: 'ko', gender: 'M', sample: '핵심만 간단히 전달하는 내러티브에 적합합니다.' },
-  { id: 'ko-female-2', name: '한국어 여성 (친근)', lang: 'ko', gender: 'F', sample: '일상 브이로그나 리뷰에 잘 어울려요.' },
-  { id: 'ko-male-2', name: '한국어 남성 (뉴스)', lang: 'ko', gender: 'M', sample: '속보나 정보 전달형 콘텐츠에 추천합니다.' },
-  { id: 'en-neutral', name: 'English (Neutral)', lang: 'en', gender: 'N', sample: 'Suitable for global shorts and tutorials.' },
+// --- [Step 5: 보이스 프리셋 (MiniMax voice_id)] ---
+const VOICE_PRESETS = [
+  { id: 'ko-female-1', voiceId: 'Wise_Woman', name: '한국어 여성 (밝은 톤)', sample: '안녕하세요. 오늘 영상도 재미있게 봐 주세요.' },
+  { id: 'ko-female-2', voiceId: 'Young_Lady', name: '한국어 여성 (친근)', sample: '일상 브이로그나 리뷰에 잘 어울려요.' },
+  { id: 'ko-male-1', voiceId: 'Wise_Man', name: '한국어 남성 (차분)', sample: '핵심만 간단히 전달하는 내러티브에 적합합니다.' },
+  { id: 'ko-male-2', voiceId: 'Present_Male', name: '한국어 남성 (뉴스)', sample: '속보나 정보 전달형 콘텐츠에 추천합니다.' },
+  { id: 'en-neutral', voiceId: 'Wise_Woman', name: 'English (Neutral)', sample: 'Suitable for global shorts and tutorials.' },
 ];
 
-const MOCK_VOICE_SEGMENTS = [
-  { id: 1, sceneIndex: 1, text: '오늘은 60초 안에 핵심만 정리해 드립니다.', durationSec: 4.2, status: 'done' as const },
-  { id: 2, sceneIndex: 2, text: '첫 번째, 기획 단계에서 타깃을 명확히 하세요.', durationSec: 3.8, status: 'done' as const },
-  { id: 3, sceneIndex: 3, text: '두 번째, 훅이 되는 오프닝 한 문장을 설계하세요.', durationSec: 4.1, status: 'done' as const },
-  { id: 4, sceneIndex: 4, text: '마지막으로 CTA와 구독 유도로 마무리하면 됩니다.', durationSec: 3.5, status: 'done' as const },
-];
+type VoiceSegment = {
+  id: number;
+  sceneIndex: number;
+  text: string;
+  durationSec: number;
+  status: 'pending' | 'done';
+  audioUrl?: string;
+};
 
 const MOCK_VIDEO_TIMELINE = [
   { id: 'v1', label: '씬 1', duration: 4.2, thumb: null },
@@ -1271,11 +1399,71 @@ function getYoutubeThumbnailUrl(videoId: string): string {
 
 // --- [Step 5: AI 음성 합성] ---
 const VoiceStep = () => {
-  const [selectedVoiceId, setSelectedVoiceId] = useState(MOCK_VOICES[0].id);
-  const [segments] = useState(MOCK_VOICE_SEGMENTS);
+  const context = useContext(GlobalContext);
+  const scenes = context?.scenes ?? [];
+  const [selectedVoiceId, setSelectedVoiceId] = useState(VOICE_PRESETS[0].id);
+  const [segments, setSegments] = useState<VoiceSegment[]>([]);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [samplePlaying, setSamplePlaying] = useState(false);
 
-  const selectedVoice = MOCK_VOICES.find(v => v.id === selectedVoiceId);
+  const selectedVoice = VOICE_PRESETS.find(v => v.id === selectedVoiceId);
+
+  useEffect(() => {
+    if (scenes.length > 0)
+      setSegments(scenes.map((s, i) => ({
+        id: s.id,
+        sceneIndex: i + 1,
+        text: s.narrative || '(대사 없음)',
+        durationSec: 0,
+        status: 'pending' as const,
+        audioUrl: undefined,
+      })));
+    else
+      setSegments([]);
+  }, [scenes]);
+
+  const handleSynthesizeAll = async () => {
+    const voiceId = selectedVoice?.voiceId ?? 'Wise_Woman';
+    setIsSynthesizing(true);
+    try {
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const text = (seg.text || '').trim().replace(/^\(대사 없음\)$/, '');
+        if (!text) {
+          setSegments(prev => prev.map((p, j) => j === i ? { ...p, status: 'done' as const } : p));
+          continue;
+        }
+        try {
+          const { url, duration_ms } = await studioTts({ text, voice_id: voiceId });
+          setSegments(prev => prev.map((p, j) =>
+            j === i ? { ...p, status: 'done' as const, audioUrl: url, durationSec: duration_ms / 1000 } : p
+          ));
+        } catch {
+          setSegments(prev => prev.map((p, j) => j === i ? { ...p, status: 'pending' as const } : p));
+        }
+      }
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
+
+  const playUrl = (url: string) => {
+    const audio = new Audio(url);
+    audio.play().catch(() => {});
+  };
+
+  const handleSamplePlay = async () => {
+    if (!selectedVoice?.sample) return;
+    setSamplePlaying(true);
+    try {
+      const { url } = await studioTts({ text: selectedVoice.sample, voice_id: selectedVoice.voiceId });
+      playUrl(url);
+    } catch {
+      /* ignore */
+    } finally {
+      setSamplePlaying(false);
+    }
+  };
 
   return (
     <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
@@ -1290,7 +1478,7 @@ const VoiceStep = () => {
           <div className="ui-card space-y-4">
             <span className="ui-label">보이스 선택</span>
             <div className="space-y-2">
-              {MOCK_VOICES.map(v => (
+              {VOICE_PRESETS.map(v => (
                 <button
                   key={v.id}
                   onClick={() => setSelectedVoiceId(v.id)}
@@ -1308,8 +1496,13 @@ const VoiceStep = () => {
           <div className="ui-card ui-card--muted">
             <span className="ui-label">미리듣기</span>
             <p className="text-sm text-slate-600 mb-2">{selectedVoice?.sample}</p>
-            <button className="ui-btn ui-btn--secondary w-full" disabled>
-              <PlayCircle size={14} /> 샘플 재생 (목업)
+            <button
+              className="ui-btn ui-btn--secondary w-full"
+              disabled={samplePlaying}
+              onClick={handleSamplePlay}
+            >
+              {samplePlaying ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />}
+              샘플 재생
             </button>
           </div>
         </div>
@@ -1318,26 +1511,38 @@ const VoiceStep = () => {
           <div className="ui-card flex items-center justify-between">
             <span className="ui-label">장면별 음성 세그먼트</span>
             <button
-              onClick={() => setIsSynthesizing(true)}
-              disabled={isSynthesizing}
+              onClick={handleSynthesizeAll}
+              disabled={isSynthesizing || segments.length === 0}
               className="ui-btn ui-btn--primary"
             >
               {isSynthesizing ? <Loader2 size={14} className="animate-spin" /> : <Music4 size={14} />}
-              전체 합성 (목업)
+              전체 합성
             </button>
           </div>
           <div className="space-y-3">
-            {segments.map((seg, idx) => (
-              <div key={seg.id} className="ui-card flex items-center gap-4">
-                <span className="ui-step__num is-selected">{(idx + 1).toString().padStart(2, '0')}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-900 truncate">{seg.text}</p>
-                  <p className="text-xs text-slate-500">{seg.durationSec}초 · 씬 {seg.sceneIndex}</p>
-                </div>
-                <span className="ui-pill">{seg.status === 'done' ? '완료' : '대기'}</span>
-                <button className="ui-btn ui-btn--ghost" disabled><PlayCircle size={14} /> 재생</button>
+            {segments.length === 0 ? (
+              <div className="ui-card--ghost ui-card--airy text-center text-slate-500">
+                Step 4에서 장면을 만든 뒤 여기로 오세요.
               </div>
-            ))}
+            ) : (
+              segments.map((seg, idx) => (
+                <div key={seg.id} className="ui-card flex items-center gap-4">
+                  <span className="ui-step__num is-selected">{(idx + 1).toString().padStart(2, '0')}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-900 truncate">{seg.text}</p>
+                    <p className="text-xs text-slate-500">{seg.durationSec > 0 ? `${seg.durationSec.toFixed(1)}초` : '—'} · 씬 {seg.sceneIndex}</p>
+                  </div>
+                  <span className="ui-pill">{seg.status === 'done' ? '완료' : '대기'}</span>
+                  <button
+                    className="ui-btn ui-btn--ghost"
+                    disabled={!seg.audioUrl}
+                    onClick={() => seg.audioUrl && playUrl(seg.audioUrl)}
+                  >
+                    <PlayCircle size={14} /> 재생
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -1704,7 +1909,7 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
 
 // --- [메인 레이아웃 쉘] ---
 const AppContent = ({ projectName }: { projectName: string }) => {
-  const { currentStep, setCurrentStep, isLoading, setIsLoading, setDescriptionInput, setIsFileLoaded, isDevMode, setIsDevMode } = useGlobal();
+  const { currentStep, setCurrentStep, isLoading, loadingMessage, setDescriptionInput, setIsFileLoaded, isDevMode, setIsDevMode } = useGlobal();
   const [toast, setToast] = useState<string | null>(null);
   const [isGlobalDragging, setIsGlobalDragging] = useState(false);
 
@@ -1762,7 +1967,7 @@ const AppContent = ({ projectName }: { projectName: string }) => {
       {isLoading && (
         <div className="absolute inset-0 z-[100] bg-white/90 backdrop-blur-md flex flex-col items-center justify-center">
           <Loader2 size={40} className="text-rose-600 animate-spin mb-4"/>
-          <p className="ui-label">Loading</p>
+          <p className="ui-label">{loadingMessage ?? '처리 중...'}</p>
         </div>
       )}
       
@@ -1823,10 +2028,11 @@ const AppContent = ({ projectName }: { projectName: string }) => {
 };
 
 type StudioViewProps = {
+  sessionId?: number;
   projectName: string;
 };
 
-export function StudioView({ projectName }: StudioViewProps) {
+export function StudioView({ sessionId, projectName }: StudioViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1845,7 +2051,7 @@ export function StudioView({ projectName }: StudioViewProps) {
 
   return (
     <div ref={containerRef} className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-      <GlobalProvider>
+      <GlobalProvider sessionId={sessionId}>
         <AppContent projectName={projectName} />
       </GlobalProvider>
     </div>

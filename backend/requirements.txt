@@ -15,3 +15,4 @@ openai
 boto3
 pymupdf
 fal-client
+google-api-python-client>=2.0
