@@ -7,8 +7,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...options.headers },
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error((err as { detail?: string }).detail || res.statusText);
+    const err = await res.json().catch(() => ({ detail: res.statusText, error: res.statusText }));
+    const msg = (err as { detail?: string; error?: string }).detail ?? (err as { error?: string }).error ?? res.statusText;
+    throw new Error(msg);
   }
   if (res.status === 204) {
     return undefined as T;

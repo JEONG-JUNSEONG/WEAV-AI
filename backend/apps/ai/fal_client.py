@@ -117,8 +117,22 @@ def image_generation_fal(prompt: str, model: str = FAL_IMAGEN4, aspect_ratio: st
         if kwargs.get('mask_url'):
             payload['mask_url'] = kwargs['mask_url']
 
+    elif 'flux' in model.lower() or 'sdxl' in model.lower() or 'nano-banana' in model.lower():
+        # flux/dev, fast-sdxl, nano-banana: use model as endpoint with common payload
+        endpoint = model
+        allowed_ratio = ('21:9', '16:9', '4:3', '3:2', '1:1', '2:3', '3:4', '9:16', '9:21')
+        if aspect_ratio not in allowed_ratio:
+            aspect_ratio = '16:9'
+        payload = {
+            'prompt': prompt,
+            'num_images': num_images,
+            'aspect_ratio': aspect_ratio,
+        }
+        if kwargs.get('seed') is not None:
+            payload['seed'] = kwargs['seed']
+
     else:
-        # FLUX Pro v1.1 Ultra
+        # FLUX Pro v1.1 Ultra (default)
         endpoint = FAL_FLUX_ULTRA
         allowed_ratio = ('21:9', '16:9', '4:3', '3:2', '1:1', '2:3', '3:4', '9:16', '9:21')
         out_fmt = kwargs.get('output_format') or 'jpeg'
@@ -155,3 +169,38 @@ def image_generation_fal(prompt: str, model: str = FAL_IMAGEN4, aspect_ratio: st
             result.append(res)
 
     return result
+
+
+# MiniMax Speech 2.6 HD: Studio Step 5 TTS
+FAL_TTS_MINIMAX = 'fal-ai/minimax/speech-2.6-hd'
+
+
+def tts_minimax(
+    text: str,
+    voice_id: str = 'Wise_Woman',
+    speed: float = 1.0,
+    output_format: str = 'url',
+) -> dict:
+    """
+    fal.ai MiniMax Speech 2.6 HD TTS.
+    Returns dict with 'url' (audio URL) and 'duration_ms'.
+    voice_id: preset e.g. Wise_Woman, or custom_voice_id from voice-clone.
+    """
+    payload = {
+        'prompt': (text or '').strip(),
+        'output_format': output_format if output_format in ('url', 'hex') else 'url',
+        'voice_setting': {
+            'voice_id': voice_id,
+            'speed': max(0.5, min(2.0, speed)),
+            'vol': 1,
+            'pitch': 0,
+        },
+    }
+    r = requests.post(f'{FAL_BASE}/{FAL_TTS_MINIMAX}', headers=_fal_headers(), json=payload, timeout=120)
+    r.raise_for_status()
+    data = r.json()
+    audio = data.get('audio') or {}
+    url = audio.get('url') or ''
+    if not url:
+        raise FALError(data.get('error', 'No audio URL'))
+    return {'url': url, 'duration_ms': data.get('duration_ms', 0)}
