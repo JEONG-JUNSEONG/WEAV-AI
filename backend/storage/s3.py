@@ -20,7 +20,10 @@ class MinIOStorage:
             config=boto3.session.Config(signature_version='s3v4')
         )
         
-        self._ensure_bucket_exists()
+        try:
+            self._ensure_bucket_exists()
+        except Exception as e:
+            logger.warning(f"MinIO initial check failed: {e}")
 
     def _ensure_bucket_exists(self):
         try:
