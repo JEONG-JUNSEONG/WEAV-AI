@@ -1,6 +1,11 @@
 import logging
 import tempfile
 import os
+import io
+import shutil
+import subprocess
+import uuid
+import re
 import fitz  # PyMuPDF
 from celery import shared_task
 from django.conf import settings
@@ -21,6 +26,59 @@ except ImportError:
     minio_client = None
 
 logger = logging.getLogger(__name__)
+
+def convert_to_pdf(input_path: str) -> str:
+    """
+    Convert a document to PDF using LibreOffice.
+    Returns the output PDF path.
+    """
+    if not shutil.which("soffice"):
+        raise RuntimeError("LibreOffice (soffice) is not available for document conversion.")
+    output_dir = tempfile.mkdtemp(prefix="doc_convert_")
+    try:
+        result = subprocess.run(
+            [
+                "soffice",
+                "--headless",
+                "--nologo",
+                "--norestore",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                output_dir,
+                input_path,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        if result.returncode != 0:
+            raise RuntimeError(f"LibreOffice conversion failed: {stderr or stdout}")
+
+        # Try to parse output path from stdout
+        match = re.search(r"->\\s+(.*?\\.pdf)\\s+using", stdout)
+        if match:
+            candidate = match.group(1)
+            if os.path.exists(candidate):
+                return candidate
+
+        base = os.path.splitext(os.path.basename(input_path))[0]
+        candidate = os.path.join(output_dir, f"{base}.pdf")
+        if os.path.exists(candidate):
+            return candidate
+        # Fallback: pick the first PDF in output dir
+        for name in os.listdir(output_dir):
+            if name.lower().endswith(".pdf"):
+                return os.path.join(output_dir, name)
+        detail = stderr or stdout or "No output from LibreOffice."
+        raise RuntimeError(f"Converted PDF not found after conversion. {detail}")
+    except Exception:
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise
 
 def get_bbox_iou(box1, box2):
     """
@@ -55,6 +113,8 @@ def extract_text_and_bbox_with_pymupdf(doc):
     extracted_data = []
     try:
         for page_num, page in enumerate(doc):
+            page_width = float(page.rect.width)
+            page_height = float(page.rect.height)
             # "blocks" -> (x0, y0, x1, y1, "lines", block_no, block_type)
             # block_type=0 is text, block_type=1 is image
             blocks = page.get_text("blocks")
@@ -69,7 +129,9 @@ def extract_text_and_bbox_with_pymupdf(doc):
                         'text': text,
                         'bbox': bbox,
                         'page': page_num + 1, # 1-indexed for user friendliness
-                        'source_type': 'parsed'
+                        'source_type': 'parsed',
+                        'page_width': page_width,
+                        'page_height': page_height
                     })
     except Exception as e:
         logger.error(f"PyMuPDF block extraction failed: {e}")
@@ -87,6 +149,8 @@ def extract_text_and_bbox_with_ocr(doc):
 
     try:
         for page_num, page in enumerate(doc):
+            page_width = float(page.rect.width)
+            page_height = float(page.rect.height)
             pix = page.get_pixmap()
             img_data = pix.tobytes("png")
             image = Image.open(io.BytesIO(img_data))
@@ -129,7 +193,9 @@ def extract_text_and_bbox_with_ocr(doc):
                         'text': full_text,
                         'bbox': content['bbox'],
                         'page': page_num + 1,
-                        'source_type': 'ocr'
+                        'source_type': 'ocr',
+                        'page_width': page_width,
+                        'page_height': page_height
                     })
 
     except Exception as e:
@@ -180,9 +246,97 @@ def merge_parsed_and_ocr(parsed_data, ocr_data):
     merged_data.sort(key=lambda x: (x['page'], x['bbox'][1]))
     return merged_data
 
+def merge_text_chunks_by_page(chunks, max_chars: int = 450, overlap_chars: int = 80):
+    """
+    Merge consecutive text blocks into paragraph-like chunks with overlap.
+    This improves retrieval by preserving context while keeping chunks reasonably small.
+    """
+    if not chunks:
+        return []
+
+    by_page: dict[int, list[dict]] = {}
+    for chunk in chunks:
+        by_page.setdefault(chunk['page'], []).append(chunk)
+
+    merged: list[dict] = []
+    for page, blocks in by_page.items():
+        blocks = sorted(blocks, key=lambda x: (x['bbox'][1], x['bbox'][0]))
+        i = 0
+        carry_blocks: list[dict] = []
+        while i < len(blocks):
+            current_blocks = list(carry_blocks)
+            current_text = " ".join(b['text'].strip() for b in current_blocks if b['text'].strip()).strip()
+            bbox = None
+
+            def union_bbox(base, new_box):
+                if base is None:
+                    return list(new_box)
+                return [
+                    min(base[0], new_box[0]),
+                    min(base[1], new_box[1]),
+                    max(base[2], new_box[2]),
+                    max(base[3], new_box[3]),
+                ]
+
+            for b in current_blocks:
+                bbox = union_bbox(bbox, b['bbox'])
+
+            while i < len(blocks):
+                b = blocks[i]
+                b_text = b['text'].strip()
+                i += 1
+                if not b_text:
+                    continue
+                candidate = b_text if not current_text else f"{current_text} {b_text}"
+                if current_text and len(candidate) > max_chars:
+                    i -= 1
+                    break
+                current_text = candidate
+                current_blocks.append(b)
+                bbox = union_bbox(bbox, b['bbox'])
+
+            if not current_text and i < len(blocks):
+                b = blocks[i]
+                b_text = b['text'].strip()
+                i += 1
+                current_text = b_text
+                current_blocks = [b]
+                bbox = union_bbox(bbox, b['bbox'])
+
+            if not current_text:
+                break
+
+            ref = current_blocks[0]
+            merged.append({
+                'text': current_text,
+                'bbox': bbox,
+                'page': page,
+                'source_type': 'merged',
+                'page_width': ref.get('page_width'),
+                'page_height': ref.get('page_height'),
+            })
+
+            # Build overlap blocks for next chunk
+            carry_blocks = []
+            carry_text = ""
+            if overlap_chars > 0:
+                for b in reversed(current_blocks):
+                    b_text = b['text'].strip()
+                    if not b_text:
+                        continue
+                    candidate = b_text if not carry_text else f"{b_text} {carry_text}"
+                    if len(candidate) > overlap_chars and carry_text:
+                        break
+                    carry_text = candidate
+                    carry_blocks.insert(0, b)
+
+    return merged
+
 @shared_task(bind=True, max_retries=3)
 def process_pdf_document(self, document_id):
     tmp_path = None # Initialize tmp_path to ensure it's defined for os.unlink
+    converted_pdf_path = None
+    converted_dir = None
     try:
         doc_record = Document.objects.get(id=document_id)
         doc_record.status = Document.STATUS_PROCESSING
@@ -199,14 +353,27 @@ def process_pdf_document(self, document_id):
         if not content_bytes:
              raise Exception("Failed to retrieve file content from MinIO")
 
-        # Save to temp file for fitz
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        # Save to temp file for processing
+        original_name = doc_record.original_name or doc_record.file_name
+        original_ext = os.path.splitext(original_name)[1].lower()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext or ".pdf") as tmp:
             tmp.write(content_bytes)
             tmp_path = tmp.name
 
+        pdf_path = tmp_path
+        if original_ext in ('.hwp', '.hwpx'):
+            converted_pdf_path = convert_to_pdf(tmp_path)
+            converted_dir = os.path.dirname(converted_pdf_path)
+            pdf_key = f"{doc_record.session_id}/{uuid.uuid4()}.pdf"
+            with open(converted_pdf_path, "rb") as pdf_file:
+                minio_client.upload_file(pdf_file, pdf_key, content_type="application/pdf")
+            doc_record.pdf_file_name = pdf_key
+            doc_record.save(update_fields=['pdf_file_name'])
+            pdf_path = converted_pdf_path
+
         # 2. Extract & Merge
         # We need to open the PDF file with fitz
-        pdf_doc = fitz.open(tmp_path)
+        pdf_doc = fitz.open(pdf_path)
         
         logger.info(f"Starting extraction for doc {document_id}")
 
@@ -221,6 +388,8 @@ def process_pdf_document(self, document_id):
         # C. Merge
         final_chunks = merge_parsed_and_ocr(parsed_chunks, ocr_chunks)
         logger.info(f"Final merged chunks: {len(final_chunks)}")
+        final_chunks = merge_text_chunks_by_page(final_chunks)
+        logger.info(f"Merged paragraph chunks: {len(final_chunks)}")
         
         if not final_chunks:
             # Fallback if both failed (e.g. empty scan without OCR setup)
@@ -235,14 +404,26 @@ def process_pdf_document(self, document_id):
         
         for i, chunk in enumerate(final_chunks):
             content_text = chunk['text']
+            page_width = chunk.get('page_width') or 1.0
+            page_height = chunk.get('page_height') or 1.0
+            bbox = chunk['bbox']
+            bbox_norm = [
+                bbox[0] / page_width,
+                bbox[1] / page_height,
+                bbox[2] / page_width,
+                bbox[3] / page_height,
+            ]
             
             # Metadata construction with bbox and page
             meta = {
                 'source': 'pdf',
                 'document_id': doc_record.id,
-                'filename': doc_record.file_name,
+                'filename': doc_record.original_name or doc_record.file_name,
                 'page': chunk['page'],
-                'bbox': chunk['bbox'],
+                'bbox': bbox,
+                'bbox_norm': bbox_norm,
+                'page_width': page_width,
+                'page_height': page_height,
                 'source_type': chunk.get('source_type', 'unknown')
             }
             
@@ -266,6 +447,13 @@ def process_pdf_document(self, document_id):
         except:
             pass
     finally:
+        try:
+            if 'pdf_doc' in locals():
+                pdf_doc.close()
+        except Exception:
+            pass
+        if converted_dir and os.path.isdir(converted_dir):
+            shutil.rmtree(converted_dir, ignore_errors=True)
         if tmp_path and os.path.exists(tmp_path):
             try:
                 # PDF might be open by fitz, close it explicitly if referenced, 

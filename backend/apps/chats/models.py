@@ -44,6 +44,7 @@ class Message(models.Model):
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='messages')
     role = models.CharField(max_length=20)  # user | assistant
     content = models.TextField()
+    citations = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -80,6 +81,8 @@ class Document(models.Model):
 
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='documents')
     file_name = models.CharField(max_length=255)
+    pdf_file_name = models.CharField(max_length=255, blank=True, default='')
+    original_name = models.CharField(max_length=255, blank=True, default='')
     file_url = models.URLField(max_length=2048)  # MinIO URL
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     error_message = models.TextField(blank=True)

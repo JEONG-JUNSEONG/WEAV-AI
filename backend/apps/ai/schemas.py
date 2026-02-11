@@ -26,6 +26,7 @@ class ImageGenerationRequest(BaseModel):
     num_images: int = Field(default=1, ge=1, le=4)
     reference_image_id: Optional[int] = None
     reference_image_url: Optional[str] = Field(None, max_length=2048)
+    image_urls: Optional[list[str]] = None
     resolution: Optional[str] = Field(None, pattern=r'^(1K|2K|4K)$')
     output_format: Optional[str] = Field(None, pattern=r'^(png|jpeg|webp)$')
     seed: Optional[int] = Field(None, ge=0)

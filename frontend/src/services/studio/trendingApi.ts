@@ -1,5 +1,3 @@
-import { api } from '@/services/api/apiClient';
-
 export type TrendingItem = {
   name: string;
   viewCount: number;

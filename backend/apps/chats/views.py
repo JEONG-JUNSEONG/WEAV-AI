@@ -5,9 +5,10 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from django.http import HttpResponse
 
-from .models import Session, Message, ImageRecord, Document, SESSION_KIND_CHAT, SESSION_KIND_IMAGE, SESSION_KIND_STUDIO
-from .serializers import SessionListSerializer, SessionDetailSerializer, MessageSerializer, ImageRecordSerializer
+from .models import Session, Message, ImageRecord, Document, ChatMemory, SESSION_KIND_CHAT, SESSION_KIND_IMAGE, SESSION_KIND_STUDIO
+from .serializers import SessionListSerializer, SessionDetailSerializer, MessageSerializer, ImageRecordSerializer, DocumentSerializer
 from .tasks import process_pdf_document
 
 try:
@@ -114,6 +115,21 @@ def session_upload(request, session_id):
     if not minio_client:
         return Response({'detail': 'Storage service unavailable'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
+    allowed_content_types = {
+        'application/pdf',
+        'application/x-pdf',
+        'application/x-hwp',
+        'application/haansofthwp',
+        'application/vnd.hancom.hwp',
+        'application/vnd.hancom.hwpx',
+        'application/octet-stream',
+    }
+    allowed_exts = ('.pdf', '.hwp', '.hwpx')
+    if file_obj.content_type not in allowed_content_types:
+        # Fallback to extension check
+        if not file_obj.name.lower().endswith(allowed_exts):
+            return Response({'detail': 'Only PDF/HWP/HWPX files are supported'}, status=status.HTTP_400_BAD_REQUEST)
+
     # Generate unique filename/key
     ext = os.path.splitext(file_obj.name)[1]
     # Structure: user_id/session_id/uuid.ext or session_id/uuid.ext
@@ -122,12 +138,14 @@ def session_upload(request, session_id):
     try:
         # Upload
         logger.info(f"Uploading file {key} to MinIO")
-        file_url = minio_client.upload_file(file_obj, key)
+        content_type = file_obj.content_type or 'application/octet-stream'
+        file_url = minio_client.upload_file(file_obj, key, content_type=content_type)
         
         # Create Document Record
         doc = Document.objects.create(
             session=session,
             file_name=key, # Storing the key in file_name for now as per task logic
+            original_name=os.path.basename(file_obj.name),
             file_url=file_url,
             status=Document.STATUS_PENDING
         )
@@ -139,10 +157,92 @@ def session_upload(request, session_id):
         return Response({
             'detail': 'File uploaded and processing started', 
             'document_id': doc.id,
-            'file_url': file_url,
+            'original_name': doc.original_name,
+            'file_url': request.build_absolute_uri(f"/api/v1/sessions/{session_id}/documents/{doc.id}/file/"),
             'status': doc.status
         }, status=status.HTTP_202_ACCEPTED)
         
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def session_documents(request, session_id):
+    try:
+        session = Session.objects.get(pk=session_id)
+        if session.user and request.user.is_authenticated and session.user != request.user:
+             return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    except Session.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    docs = session.documents.all()
+    serializer = DocumentSerializer(docs, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def session_document_file(request, session_id, document_id):
+    try:
+        session = Session.objects.get(pk=session_id)
+        if session.user and request.user.is_authenticated and session.user != request.user:
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    except Session.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(pk=document_id, session_id=session_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not minio_client:
+        return Response({'detail': 'Storage service unavailable'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    file_key = doc.pdf_file_name or doc.file_name
+    try:
+        content = minio_client.get_file_content(file_key)
+    except Exception as e:
+        return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    filename = doc.original_name or doc.file_name
+    if doc.pdf_file_name:
+        base = os.path.splitext(filename)[0]
+        filename = f"{base}.pdf"
+    response = HttpResponse(content, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    return response
+
+
+@api_view(['DELETE'])
+def session_document_delete(request, session_id, document_id):
+    try:
+        session = Session.objects.get(pk=session_id)
+        if session.user and request.user.is_authenticated and session.user != request.user:
+            return Response({'detail': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    except Session.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = Document.objects.get(pk=document_id, session_id=session_id)
+    except Document.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Delete stored files
+    if minio_client:
+        keys = {doc.file_name}
+        if doc.pdf_file_name:
+            keys.add(doc.pdf_file_name)
+        for key in keys:
+            try:
+                minio_client.delete_file(key)
+            except Exception:
+                logger.warning(f"Failed to delete file key from MinIO: {key}")
+
+    # Remove related vector memory
+    try:
+        ChatMemory.objects.filter(session_id=session_id, metadata__document_id=document_id).delete()
+    except Exception as e:
+        logger.warning(f"Failed to delete memories for doc {document_id}: {e}")
+
+    doc.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)

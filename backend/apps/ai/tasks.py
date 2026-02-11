@@ -1,13 +1,73 @@
-from typing import Optional
+from typing import Optional, Tuple
+import re
 
 from celery import shared_task
 from django.db import transaction
-from apps.chats.models import Message, ImageRecord, Job
+from apps.chats.models import Message, ImageRecord, Job, Document
 from apps.chats.services import memory_service
-from .router import run_chat, run_image
+from .router import (
+    run_chat,
+    run_image,
+    IMAGE_MODEL_GEMINI3_PRO_IMAGE,
+    IMAGE_MODEL_KLING,
+    IMAGE_MODEL_NANO_BANANA,
+    IMAGE_MODEL_NANO_BANANA_EDIT,
+)
 from .errors import AIError
 from .utils import get_rag_enhanced_system_prompt, get_rag_context_string
 from .system_rules import prepend_model_rule
+
+DOC_MENTION_RE = re.compile(r'@([^\s]+)')
+DOC_MENTION_QUOTED_RE = re.compile(r'@"([^"]+)"')
+DOC_MENTION_QUOTED_SINGLE_RE = re.compile(r"@'([^']+)'")
+
+
+def _fallback_extract_doc_name(prompt: str) -> Optional[str]:
+    if not prompt:
+        return None
+    match = DOC_MENTION_QUOTED_RE.search(prompt)
+    if match:
+        return match.group(1)
+    match = DOC_MENTION_QUOTED_SINGLE_RE.search(prompt)
+    if match:
+        return match.group(1)
+    match = DOC_MENTION_RE.search(prompt)
+    if not match:
+        return None
+    candidate = match.group(1).rstrip('.,!?')
+    if '.pdf' not in candidate.lower():
+        return None
+    return candidate
+
+
+def find_document_mention(prompt: str, documents: list[Document]) -> Optional[Tuple[Document, str]]:
+    if not prompt or '@' not in prompt:
+        return None
+    candidates: list[Tuple[int, int, Document, str]] = []
+    for doc in documents:
+        name = doc.original_name or doc.file_name
+        if not name:
+            continue
+        markers = (f'@"{name}"', f"@'{name}'", f'@{name}')
+        for marker in markers:
+            start = prompt.find(marker)
+            while start != -1:
+                candidates.append((start, len(marker), doc, marker))
+                start = prompt.find(marker, start + len(marker))
+    if not candidates:
+        return None
+    # Pick earliest match; if same position, prefer longer marker
+    candidates.sort(key=lambda item: (item[0], -item[1]))
+    _, _, doc, marker = candidates[0]
+    return doc, marker
+
+
+def strip_doc_marker(prompt: str, marker: str) -> str:
+    if not prompt or not marker:
+        return prompt
+    cleaned = prompt.replace(marker, "", 1)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    return cleaned.strip()
 
 
 @shared_task(bind=True, max_retries=2)
@@ -23,12 +83,99 @@ def task_chat(self, job_id: int, prompt: str, model: str, system_prompt: Optiona
         recent_conversation = "\n".join(
             f"{m.role.capitalize()}: {m.content}" for m in recent if (m.role and m.content)
         )
-        enhanced_system_prompt = get_rag_enhanced_system_prompt(
-            job.session.id, prompt, base_system_prompt, recent_conversation=recent_conversation
-        )
-        reply = run_chat(prompt, model=model, system_prompt=enhanced_system_prompt)
+        documents = list(Document.objects.filter(session=job.session).order_by('-created_at'))
+        doc_hit = find_document_mention(prompt, documents)
+        doc_name = None
+        doc = None
+        marker = None
+        if doc_hit:
+            doc, marker = doc_hit
+            doc_name = doc.original_name or doc.file_name
+        else:
+            doc_name = _fallback_extract_doc_name(prompt)
+        citations = []
+        if doc_name and doc is None:
+            # If user attempted @mention but no matching document found.
+            reply = f"'{doc_name}' 문서를 찾을 수 없습니다. 업로드한 파일명을 확인해주세요."
+            with transaction.atomic():
+                msg = Message.objects.create(session=job.session, role='assistant', content=reply, citations=[])
+                job.message = msg
+                job.status = 'success'
+                job.error_message = ''
+                job.save(update_fields=['message_id', 'status', 'error_message', 'updated_at'])
+            return {'message_id': msg.id, 'content': reply}
+
+        if doc:
+            if doc.status != Document.STATUS_COMPLETED:
+                reply = f"'{doc.original_name or doc_name}' 문서 처리 중입니다. 잠시 후 다시 시도해주세요."
+                with transaction.atomic():
+                    msg = Message.objects.create(session=job.session, role='assistant', content=reply, citations=[])
+                    job.message = msg
+                    job.status = 'success'
+                    job.error_message = ''
+                    job.save(update_fields=['message_id', 'status', 'error_message', 'updated_at'])
+                return {'message_id': msg.id, 'content': reply}
+
+            prompt_for_model = strip_doc_marker(prompt, marker) if marker else prompt
+            if not prompt_for_model:
+                prompt_for_model = prompt
+
+            memories = memory_service.search_memory(
+                [job.session.id],
+                prompt_for_model,
+                limit=6,
+                document_id=doc.id
+            )
+
+            context_lines = []
+            for idx, m in enumerate(memories, start=1):
+                meta = m.metadata or {}
+                page = meta.get('page')
+                text = m.content.strip().replace("\n", " ")
+                if len(text) > 400:
+                    text = text[:400] + "..."
+                context_lines.append(f"[{idx}] (p.{page}) {text}")
+
+                citations.append({
+                    'document_id': doc.id,
+                    'document_name': doc.original_name or doc.file_name,
+                    'page': page,
+                    'bbox': meta.get('bbox', []),
+                    'bbox_norm': meta.get('bbox_norm', []),
+                    'page_width': meta.get('page_width'),
+                    'page_height': meta.get('page_height'),
+                    'snippet': text,
+                })
+
+            doc_context = "\n".join(context_lines) if context_lines else "관련 내용을 찾지 못했습니다."
+            doc_rules = (
+                "## Document Grounding Rules\n"
+                "- You must answer using ONLY the provided document context.\n"
+                "- If the answer is not present, say you cannot find it in the document.\n"
+                "- Answer in Korean.\n"
+            )
+            recent_section = ""
+            if recent_conversation.strip():
+                recent_section = "## Recent conversation\n" + recent_conversation.strip() + "\n\n"
+            enhanced_system_prompt = (
+                f"{base_system_prompt}\n\n"
+                f"{recent_section}"
+                f"## Document Context: {doc.original_name or doc.file_name}\n"
+                f"{doc_context}\n\n"
+                f"{doc_rules}"
+            )
+            reply = run_chat(prompt_for_model, model=model, system_prompt=enhanced_system_prompt)
+        else:
+            enhanced_system_prompt = get_rag_enhanced_system_prompt(
+                job.session.id,
+                prompt,
+                base_system_prompt,
+                recent_conversation=recent_conversation,
+                exclude_sources=['pdf'],
+            )
+            reply = run_chat(prompt, model=model, system_prompt=enhanced_system_prompt)
         with transaction.atomic():
-            msg = Message.objects.create(session=job.session, role='assistant', content=reply)
+            msg = Message.objects.create(session=job.session, role='assistant', content=reply, citations=citations)
             job.message = msg
             job.status = 'success'
             job.error_message = ''
@@ -56,7 +203,21 @@ def task_chat(self, job_id: int, prompt: str, model: str, system_prompt: Optiona
 
 
 @shared_task(bind=True, max_retries=2)
-def task_image(self, job_id: int, prompt: str, model: str, aspect_ratio: str = '1:1', num_images: int = 1, seed: int = None, reference_image_id: int = None, reference_image_url: str = None, mask_url: str = None, resolution: str = None, output_format: str = None):
+def task_image(
+    self,
+    job_id: int,
+    prompt: str,
+    model: str,
+    aspect_ratio: str = '1:1',
+    num_images: int = 1,
+    seed: int = None,
+    reference_image_id: int = None,
+    reference_image_url: str = None,
+    image_urls: list[str] = None,
+    mask_url: str = None,
+    resolution: str = None,
+    output_format: str = None,
+):
     job = Job.objects.get(pk=job_id)
     job.status = 'running'
     job.save(update_fields=['status', 'updated_at'])
@@ -70,12 +231,35 @@ def task_image(self, job_id: int, prompt: str, model: str, aspect_ratio: str = '
         except ImageRecord.DoesNotExist:
             pass
 
+    attachments = [u for u in (image_urls or []) if u]
+    has_reference = ref_url is not None
+    has_attachments = len(attachments) > 0
+
+    effective_model = model
+    edit_image_urls = None
+    if model == IMAGE_MODEL_NANO_BANANA:
+        if has_reference or has_attachments:
+            effective_model = IMAGE_MODEL_NANO_BANANA_EDIT
+            edit_image_urls = []
+            if has_reference:
+                edit_image_urls.append(ref_url)
+            edit_image_urls.extend(attachments)
+            # Safety clamp: nano-banana edit supports up to 2 images
+            edit_image_urls = edit_image_urls[:2]
+        else:
+            # TTI 유지: Gemini 3 Pro Image Preview 사용
+            effective_model = IMAGE_MODEL_GEMINI3_PRO_IMAGE
+
+    if effective_model == IMAGE_MODEL_KLING:
+        if not has_reference and attachments:
+            ref_url = attachments[0]
+
     try:
         rag_context = get_rag_context_string(job.session.id, prompt)
         effective_prompt = f"{rag_context}\n\nRequest: {prompt}" if rag_context else prompt
         images = run_image(
             effective_prompt,
-            model=model,
+            model=effective_model,
             aspect_ratio=aspect_ratio,
             num_images=num_images,
             seed=seed,
@@ -83,6 +267,7 @@ def task_image(self, job_id: int, prompt: str, model: str, aspect_ratio: str = '
             mask_url=mask_url,
             resolution=resolution,
             output_format=output_format,
+            **({'image_urls': edit_image_urls} if edit_image_urls else {}),
         )
 
         if not images:
@@ -97,7 +282,7 @@ def task_image(self, job_id: int, prompt: str, model: str, aspect_ratio: str = '
                         session=job.session,
                         prompt=prompt,
                         image_url=url,
-                        model=model,
+                        model=effective_model,
                         seed=img_seed or seed,
                         mask_url=mask_url,
                         reference_image=ref_image,
@@ -120,7 +305,7 @@ def task_image(self, job_id: int, prompt: str, model: str, aspect_ratio: str = '
                     'type': 'image_generation',
                     'image_record_id': job.image_record.id,
                     'image_url': job.image_record.image_url,
-                    'model': model
+                    'model': effective_model
                 }
             )
 

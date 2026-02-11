@@ -17,18 +17,54 @@ type AppContextValue = {
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
+const LAST_SESSION_KEY = 'weav:lastSessionId';
+
+const readLastSessionId = (): number | null => {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(LAST_SESSION_KEY);
+  if (!raw) return null;
+  const id = Number(raw);
+  return Number.isFinite(id) ? id : null;
+};
+
+const writeLastSessionId = (id: number | null) => {
+  if (typeof window === 'undefined') return;
+  if (id == null) {
+    window.localStorage.removeItem(LAST_SESSION_KEY);
+  } else {
+    window.localStorage.setItem(LAST_SESSION_KEY, String(id));
+  }
+};
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const currentSessionIdRef = useRef<number | null>(null);
+  const restoredRef = useRef(false);
   currentSessionIdRef.current = currentSession?.id ?? null;
 
   const loadSessions = useCallback(async () => {
     try {
       const list = await sessionApi.list();
       setSessions(list);
+      if (!currentSessionIdRef.current && !restoredRef.current) {
+        const storedId = readLastSessionId();
+        if (storedId != null) {
+          const found = list.find((s) => s.id === storedId);
+          if (found) {
+            try {
+              const full = await sessionApi.get(storedId);
+              setCurrentSession(full);
+            } catch {
+              writeLastSessionId(null);
+            }
+          } else {
+            writeLastSessionId(null);
+          }
+        }
+        restoredRef.current = true;
+      }
     } finally {
       setLoading(false);
     }
@@ -61,16 +97,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const session = await sessionApi.create(kind, title);
     setSessions((prev) => [session, ...prev]);
     setCurrentSession(session);
+    writeLastSessionId(session.id);
     return session;
   }, []);
 
   const selectSession = useCallback(async (session: Session | null) => {
     if (!session) {
       setCurrentSession(null);
+      writeLastSessionId(null);
       return;
     }
     const full = await sessionApi.get(session.id);
     setCurrentSession(full);
+    writeLastSessionId(full.id);
   }, []);
 
   const patchSession = useCallback(async (id: number, data: { title?: string }) => {
@@ -83,6 +122,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await sessionApi.delete(id);
     setSessions((prev) => prev.filter((s) => s.id !== id));
     setCurrentSession((curr) => (curr?.id === id ? null : curr));
+    if (readLastSessionId() === id) {
+      writeLastSessionId(null);
+    }
   }, []);
 
   useEffect(() => {

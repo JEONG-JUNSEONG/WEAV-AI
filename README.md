@@ -1,132 +1,169 @@
 # WEAV AI
 
-fal.ai(GPT·Gemini 채팅, Google Imagen·FLUX 이미지) 기반 채팅·이미지 생성 서비스.  
-채팅/이미지 세션은 DB에 저장되며, 비동기(Celery)로 처리됩니다.
+fal.ai(GPT·Gemini 채팅, Google Imagen·FLUX 이미지) 기반 **채팅·이미지 생성·WEAV Studio** 서비스.  
+채팅/이미지/스튜디오 세션은 DB에 저장되며, 비동기(Celery)로 처리됩니다.
 
 ---
 
 ## 요구 사항
 
-- **Docker**, **Docker Compose** (Windows: [Docker Desktop](https://www.docker.com/products/docker-desktop/) 권장)
-- (프론트엔드 로컬 실행 시) Node.js 18+
-- [fal.ai](https://fal.ai) API 키 → **FAL_KEY**
+| 구분 | 내용 |
+|------|------|
+| **Docker** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac / Windows 공통 권장) |
+| **Node.js** | 18+ (프론트엔드만 로컬 실행할 때) |
+| **API 키** | [fal.ai](https://fal.ai) → **FAL_KEY** (필수) |
 
-**Windows**: PowerShell 5+ 또는 CMD에서 `compose.ps1` / `compose.cmd` 사용 시 동일하게 개발 가능합니다.  
-(PowerShell에서 스크립트 실행이 막혀 있으면: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` 후 `.\compose.ps1 help` 실행)
+**Mac / Linux**  
+- 터미널에서 `make` 사용 가능 (이미 있음).
 
-### 환경 점검 (Mac · Windows 공통)
-
-| 항목 | Mac / Linux | Windows |
-|------|-------------|---------|
-| Docker Desktop | 설치 후 `docker compose version` 확인 | 동일 |
-| 환경 변수 | `infra/.env`에 `FAL_KEY` 설정 | 동일 |
-| 기동 | `make up` | `.\compose.ps1 up` 또는 `compose.cmd up` |
-| 테스트 | `make test` | `.\compose.ps1 test` 또는 `compose.cmd test` |
-| 헬스체크 | `http://localhost:8080/api/v1/health/` → `{"status":"ok"}` | 동일 (브라우저 또는 curl) |
+**Windows**  
+- **PowerShell 5+** 또는 **CMD** 사용.
+- PowerShell에서 스크립트 실행이 막혀 있으면 한 번만 실행:
+  ```powershell
+  Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+  ```
+- 이후 프로젝트 루트에서 `.\compose.ps1 help` 로 동작 확인.
 
 ---
 
-## 1. Docker 올리는 방법
+## 팀원 가이드: Git에서 받은 후 사용법
 
-모든 실행·테스트는 **Docker 기준**입니다. 프로젝트 루트에서 진행합니다.
+저장소를 클론한 **팀원**이 Mac/Windows에서 처음 실행할 때 순서대로 따라하면 됩니다.
 
-### 1-1. 환경 변수 설정
+### 1단계: 저장소 클론 & 환경 변수 (한 번만)
 
-`infra` 폴더에 `.env` 파일을 두고 다음을 설정합니다.
-
-| 변수 | 설명 | 예시 |
-|------|------|------|
-| `FAL_KEY` | fal.ai API 키 (필수) | `your_fal_ai_key` |
-
-**팀 협업 시**: 저장소에는 `.env`가 없습니다. 팀원은 `infra/.env.example`을 복사해 `infra/.env`로 만들고, **FAL_KEY** 값만 팀에서 공유받으면 됩니다. (Docker만 사용할 때는 이 파일 하나만 있으면 빌드·기동·테스트 가능. 프론트 로컬 실행 시에는 `frontend/.env.example` → `frontend/.env` 복사 후 `VITE_API_BASE_URL=http://localhost:8080` 사용.)
-
-### 1-2. 이미지 빌드 및 서비스 기동
-
-**macOS / Linux (Makefile):**
 ```bash
-# 프로젝트 루트로 이동
-cd ..
+# 저장소 클론 (예시)
+git clone https://github.com/your-org/WEAV-AI.git
+cd WEAV-AI
 
+# 인프라용 환경 변수 파일 생성
+# Mac/Linux:
+cp infra/.env.example infra/.env
+
+# Windows (PowerShell):
+# Copy-Item infra\.env.example infra\.env
+
+# infra/.env 를 열어 FAL_KEY= 본인_키 로 수정 (필수)
+```
+
+- **FAL_KEY**: [fal.ai](https://fal.ai) 대시보드에서 발급. 팀에서 공유받거나 본인 계정으로 발급.
+- 선택 항목(`YOUTUBE_API_KEY`, `MINIO_PUBLIC_ENDPOINT` 등)은 `infra/.env.example` 주석 참고.
+
+### 2단계: 백엔드 실행 (Docker)
+
+**Mac / Linux (프로젝트 루트에서):**
+```bash
 make build
 make up
 ```
 
-**Windows (PowerShell):** 프로젝트 루트에서
+**Windows – PowerShell (프로젝트 루트에서):**
 ```powershell
 .\compose.ps1 build
 .\compose.ps1 up
 ```
 
-**Windows (CMD):** 프로젝트 루트에서
+**Windows – CMD:**
 ```cmd
 compose.cmd build
 compose.cmd up
 ```
 
-**공통 (어느 OS든):** `infra`에서 직접
+- Docker Desktop이 설치·실행 중이어야 합니다.
+- 첫 빌드는 이미지 다운로드로 시간이 걸릴 수 있습니다.
+
+### 3단계: 백엔드 동작 확인
+
+- 브라우저에서 **http://localhost:8080/api/v1/health/** 접속.
+- `{"status":"ok"}` 가 보이면 정상입니다. (Windows에서 curl 없으면 브라우저로만 확인해도 됩니다.)
+
+### 4단계: 프론트엔드 실행 (로컬 UI)
+
+**프로젝트 루트**에서:
+
 ```bash
-cd infra
-docker compose build
-docker compose up -d
+cd frontend
+
+# .env 없으면 한 번만 생성 (API 주소 설정)
+cp .env.example .env
+# Windows: Copy-Item .env.example .env
+
+# 의존성 설치 (최초 1회 또는 package.json 변경 시)
+npm install
+
+# 개발 서버 실행
+npm run dev
 ```
 
-### 1-3. 기동 확인
+- 터미널에 나온 대로 **http://localhost:3001** 로 접속합니다. (기본 포트 3001)
+- `/api` 요청은 자동으로 `http://localhost:8080`으로 프록시되므로, **백엔드를 먼저 띄운 뒤** 프론트를 실행하세요.
 
-- **API(경유)**: 브라우저에서 `http://localhost:8080/api/v1/health/` → `{"status":"ok"}` 확인 (Windows에서 `curl` 없으면 브라우저 사용)
-- **서비스 목록**: `cd infra` 후 `docker compose ps` 로 postgres, redis, api, worker, nginx 모두 `Up` 인지 확인
+### 5단계: 매일 개발 시
 
-### 1-4. 마이그레이션
+1. **백엔드**: 프로젝트 루트에서 `make up` (Mac/Linux) 또는 `.\compose.ps1 up` (Windows) → 이미 떠 있으면 생략.
+2. **프론트**: `cd frontend` → `npm run dev` → 브라우저에서 **http://localhost:3001** 접속.
 
-`api` 컨테이너의 `entrypoint.sh`에서 **자동으로** `migrate`가 실행됩니다.  
-수동으로 한 번 더 실행하려면: `make migrate` (macOS/Linux) 또는 `.\compose.ps1 migrate` / `compose.cmd migrate` (Windows)
-
-### 1-5. 서비스 중지
-
-**macOS / Linux:** `make down`  
-**Windows:** `.\compose.ps1 down` 또는 `compose.cmd down`
+중지: 백엔드는 `make down` / `.\compose.ps1 down`, 프론트는 터미널에서 `Ctrl+C`.
 
 ---
 
-## 2. 테스트 진행 방법
+## 빠른 시작 (Mac / Windows 공통)
 
-**로컬 테스트 환경은 없습니다.** 테스트는 **반드시 Docker 환경**에서만 실행합니다.
+아래는 **프로젝트 루트** (`WEAV-AI` 폴더)에서 실행하는 기준입니다.
 
-### 2-1. 테스트 실행 (권장)
-
-서비스를 띄운 뒤, **프로젝트 루트**에서: `make test` (macOS/Linux) 또는 `.\compose.ps1 test` / `compose.cmd test` (Windows).
-
-- `infra`로 들어가 `api` 컨테이너를 일회성으로 띄우고, 그 안에서 `python manage.py test tests`를 실행합니다.
-- `tests` 패키지(헬스체크, 세션 API 등)만 실행됩니다.
-
-### 2-2. 테스트만 실행 (서비스 미기동 상태)
-
-`make up` 없이 테스트만 돌리려면 (DB·Redis 등이 필요하므로 **실제로는 postgres·redis가 떠 있어야** 테스트가 성공할 수 있음):
+### 1. 저장소 클론 후 한 번만
 
 ```bash
-make up    # 최소한 postgres, redis, api 실행
-make test  # 테스트 실행
+# 1) 프로젝트 루트로 이동
+cd WEAV-AI
+
+# 2) 인프라 환경 변수 설정
+#    infra/.env.example 을 복사해 infra/.env 생성 후 FAL_KEY 입력
 ```
 
-또는 직접:
+**infra/.env 예시 (필수만)**
+
+```env
+FAL_KEY=your_fal_ai_key
+```
+
+선택: `YOUTUBE_API_KEY`, `MINIO_PUBLIC_ENDPOINT` 등은 `infra/.env.example` 참고.
+
+### 2. Docker로 백엔드 기동
+
+| 환경 | 명령 |
+|------|------|
+| **Mac / Linux** | `make build` → `make up` |
+| **Windows (PowerShell)** | `.\compose.ps1 build` → `.\compose.ps1 up` |
+| **Windows (CMD)** | `compose.cmd build` → `compose.cmd up` |
+
+### 3. 기동 확인
+
+- 브라우저: **http://localhost:8080/api/v1/health/** → `{"status":"ok"}` 이면 정상.
+- Windows에서 `curl`이 없으면 브라우저로 위 주소만 열어보면 됩니다.
+
+### 4. 프론트엔드 실행 (로컬에서 UI 띄우기)
+
+API가 Docker로 8080에서 떠 있다고 가정합니다.
 
 ```bash
-cd infra
-docker compose run --rm api python manage.py test tests
+cd frontend
+cp .env.example .env   # 없을 때만. 내용: VITE_API_BASE_URL=http://localhost:8080
+npm install
+npm run dev
 ```
 
-### 2-3. 테스트 실패 시
-
-- api·postgres·redis 기동 확인: `make up` / `.\compose.ps1 up`
-- api 로그: `make logs` / `.\compose.ps1 logs`
-- api 컨테이너 셸 접속 후 상세 로그: `make shell` / `.\compose.ps1 shell` → `python manage.py test tests -v 2`
+- 브라우저에서 **http://localhost:3001** 접속 (기본 포트 3001, 사용 중이면 3002 등으로 안내됨).
+- `/api` 요청은 Vite가 `http://localhost:8080`으로 프록시합니다.
 
 ---
 
-## 3. 명령 요약 (macOS/Linux · Windows 동일 동작)
+## 환경별 명령 요약
 
-**프로젝트 루트**에서 실행합니다.
+**모든 명령은 프로젝트 루트에서 실행합니다.**
 
-| 동작 | macOS / Linux | Windows (PowerShell) | Windows (CMD) |
+| 동작 | Mac / Linux | Windows (PowerShell) | Windows (CMD) |
 |------|----------------|----------------------|---------------|
 | 도움말 | `make help` | `.\compose.ps1 help` | `compose.cmd help` |
 | 이미지 빌드 | `make build` | `.\compose.ps1 build` | `compose.cmd build` |
@@ -134,74 +171,102 @@ docker compose run --rm api python manage.py test tests
 | 인프라 중지 | `make down` | `.\compose.ps1 down` | `compose.cmd down` |
 | 테스트 실행 | `make test` | `.\compose.ps1 test` | `compose.cmd test` |
 | 마이그레이션 | `make migrate` | `.\compose.ps1 migrate` | `compose.cmd migrate` |
-| api 로그 | `make logs` | `.\compose.ps1 logs` | `compose.cmd logs` |
-| api 셸 접속 | `make shell` | `.\compose.ps1 shell` | `compose.cmd shell` |
+| API 로그 보기 | `make logs` | `.\compose.ps1 logs` | `compose.cmd logs` |
+| API 컨테이너 셸 | `make shell` | `.\compose.ps1 shell` | `compose.cmd shell` |
 
-모든 환경에서 `cd infra` 후 `docker compose ...` 로 직접 실행해도 됩니다.
-
----
-
-## 4. 프론트엔드 로컬 실행 (선택)
-
-API는 Docker로 `http://localhost:8080`에서 떠 있는 상태를 가정합니다.
-
-`frontend` 폴더에 `.env` 파일을 두고 다음을 설정합니다.
-
-```
-VITE_API_BASE_URL=http://localhost:8080
-```
+직접 Docker Compose를 쓰고 싶다면:
 
 ```bash
-npm install
-npm run dev
+cd infra
+docker compose up -d
+docker compose down
+docker compose run --rm api python manage.py test tests
 ```
-
-브라우저에서 `http://localhost:3000` 접속. `/api` 요청은 Vite 프록시로 `http://localhost:8080`으로 전달됩니다.
 
 ---
 
-## 5. 서비스 사용 방법
+## 환경 변수 정리
+
+### infra/.env (Docker 백엔드)
+
+| 변수 | 설명 | 필수 |
+|------|------|------|
+| `FAL_KEY` | fal.ai API 키 | ✅ |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 (트렌드 시그널 등) | 선택 |
+| `MINIO_PUBLIC_ENDPOINT` | fal이 이미지에 접근할 공개 MinIO 주소 (ngrok 등) | 선택 |
+
+- 저장소에는 `.env`가 없습니다. 팀원은 `infra/.env.example`을 복사해 `infra/.env`로 만들고, **FAL_KEY**만이라도 넣으면 Docker 빌드·기동·테스트 가능합니다.
+
+### frontend/.env (프론트만 로컬 실행 시)
+
+| 변수 | 설명 |
+|------|------|
+| `VITE_API_BASE_URL` | API 서버 주소. 기본: `http://localhost:8080` |
+
+- `frontend/.env.example`을 복사해 `frontend/.env`로 두고 위 한 줄만 넣으면 됩니다.
+
+---
+
+## 테스트
+
+- 로컬 Python 테스트 환경은 없습니다. 테스트는 **Docker 안에서만** 실행합니다.
+- 인프라를 띄운 뒤, 프로젝트 루트에서:
+  - **Mac/Linux:** `make test`
+  - **Windows:** `.\compose.ps1 test` 또는 `compose.cmd test`
+- 실패 시: `make up` / `.\compose.ps1 up` 으로 postgres·redis·api 기동 여부 확인 후, `make logs` / `.\compose.ps1 logs` 로 api 로그 확인.
+
+---
+
+## 서비스 사용 방법
 
 1. **햄버거 메뉴(☰)**  
-   - **새 채팅** / **새 이미지**로 세션 생성  
-   - 채팅·이미지 세션 목록에서 기존 세션 선택
+   - **새 채팅** / **새 이미지** / **WEAV Studio** 로 세션 생성  
+   - 채팅·이미지·스튜디오 세션 목록에서 기존 세션 선택
 
 2. **채팅**  
    - 모델 선택(Gemini 2.5 Flash/Pro, GPT-4o 등) 후 메시지 입력·전송  
-   - 응답은 비동기 처리, 완료 시 자동 갱신
+   - 응답은 비동기 처리, 완료 시 자동 갱신  
+   - 참조 이미지·첨부 이미지 지원 (Nano Banana 등)
 
 3. **이미지 생성**  
-   - 모델 선택(Imagen 4, FLUX Pro v1.1 Ultra) 후 프롬프트 입력·생성  
+   - 모델 선택(Imagen 4, FLUX Pro v1.1 Ultra, Nano Banana 등) 후 프롬프트 입력·생성  
+   - 참조 이미지·첨부 이미지로 편집 가능  
    - 생성된 이미지는 세션별 목록에 표시
+
+4. **WEAV Studio**  
+   - 기획·주제 선정·대본 설계·이미지/대본 생성·AI 음성·영상·메타데이터 AI 생성·썸네일 연구소(유튜브 URL 벤치마킹)까지 한 플로우로 진행
 
 ---
 
-## 6. API 엔드포인트
+## API 엔드포인트 (요약)
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | GET | `/api/v1/health/` | 헬스체크 |
-| GET | `/api/v1/sessions/` | 세션 목록 (`?kind=chat` \| `?kind=image`) |
+| GET | `/api/v1/sessions/` | 세션 목록 (`?kind=chat` \| `?kind=image` \| `?kind=studio`) |
 | POST | `/api/v1/sessions/` | 세션 생성 (`kind`, `title`) |
-| GET | `/api/v1/sessions/:id/` | 세션 상세 (메시지·이미지 포함) |
-| POST | `/api/v1/chat/complete/` | 채팅 전송 (비동기, `session_id`, `prompt`, `model`) |
-| POST | `/api/v1/chat/image/` | 이미지 생성 (비동기, `session_id`, `prompt`, `model`) |
+| GET | `/api/v1/sessions/:id/` | 세션 상세 |
+| POST | `/api/v1/chat/complete/` | 채팅 전송 (비동기) |
+| POST | `/api/v1/chat/image/` | 이미지 생성 (비동기, 참조/첨부 이미지 지원) |
 | GET | `/api/v1/chat/job/:task_id/` | 비동기 작업 상태·결과 조회 |
 
 ---
 
-## 7. 프로젝트 구조
+## 프로젝트 구조 (진행 상황 기준)
 
 | 경로 | 설명 |
 |------|------|
 | **backend/** | Django 4 + DRF, Celery, fal.ai 연동 |
 | **backend/config/** | 설정(settings, urls, wsgi, celery) |
-| **backend/apps/** | users, chats, core, ai |
+| **backend/apps/** | users, chats, core, ai (채팅·이미지·스튜디오 API) |
+| **backend/jobs/** | PDF 처리 등 백그라운드 작업 |
+| **backend/storage/** | S3/MinIO 업로드 (첨부·참조 이미지) |
 | **backend/tests/** | 프로젝트 테스트 (Docker에서만 실행) |
 | **frontend/** | React 19 + Vite 7 + TypeScript, Tailwind |
-| **infra/** | Docker Compose (postgres, redis, api, worker, nginx) |
-| **Makefile** | Docker 기준 up, down, build, test, migrate, logs, shell (macOS/Linux) |
-| **compose.ps1 / compose.cmd** | Windows에서 동일 명령 (PowerShell/CMD) |
+| **frontend/src/components/studio/** | WEAV Studio UI (기획·대본·음성·영상·메타·썸네일) |
+| **infra/** | Docker Compose (postgres, redis, minio, api, worker, nginx) |
+| **Makefile** | Docker 명령 래퍼 (Mac/Linux) |
+| **compose.ps1 / compose.cmd** | Docker 명령 래퍼 (Windows) |
 | **00_docs/** | 프로젝트 프레임워크·참고 문서 |
 
 자세한 구성은 [00_docs/프로젝트_프레임워크.md](00_docs/프로젝트_프레임워크.md)를 참고하세요.

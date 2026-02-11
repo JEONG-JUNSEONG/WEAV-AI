@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, Settings2, Upload, X, ArrowUp, ImagePlus } from 'lucide-react';
+import { ChevronDown, Settings2, Upload, X, ArrowUp, ImagePlus, Info, Paperclip } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
 import { useChat } from '@/contexts/ChatContext';
 import { useLayout } from '@/contexts/LayoutContext';
@@ -9,6 +9,11 @@ import {
   CHAT_PROMPT_MAX_LENGTH_BY_MODEL,
   IMAGE_PROMPT_MAX_LENGTH,
   IMAGE_PROMPT_MAX_LENGTH_BY_MODEL,
+  IMAGE_MODEL_ID_IMAGEN4,
+  IMAGE_MODEL_ID_FLUX,
+  IMAGE_MODEL_ID_GEMINI,
+  IMAGE_MODEL_ID_KLING,
+  IMAGE_MODEL_ID_NANO_BANANA,
   imageModelSupportsReference,
   validateChatPrompt,
   validateImagePrompt,
@@ -17,7 +22,13 @@ import { chatApi } from '@/services/api/chatApi';
 import { useToast } from '@/contexts/ToastContext';
 import { ModelSelector } from './ModelSelector';
 
-export function ChatInput() {
+export function ChatInput({
+  rightOffset = 0,
+  onHeightChange,
+}: {
+  rightOffset?: number;
+  onHeightChange?: (height: number) => void;
+}) {
   const { currentSession } = useApp();
   const {
     sendChatMessage,
@@ -32,6 +43,8 @@ export function ChatInput() {
     setImageModel,
     getImageSettings,
     setImageSettings,
+    getDocuments,
+    refreshDocuments,
     regeneratePrompt,
     clearRegeneratePrompt,
     regenerateChat,
@@ -42,13 +55,21 @@ export function ChatInput() {
     setReferenceImageId,
     getReferenceImageUrl,
     setReferenceImageUrl,
+    getAttachmentItems,
+    updateAttachmentItems,
+    removeAttachmentItem,
+    clearAttachmentItems,
   } = useChat();
   const { showToast } = useToast();
   const [prompt, setPrompt] = useState('');
   const [imageSettingsOpen, setImageSettingsOpen] = useState(false);
   const [uploadingRef, setUploadingRef] = useState(false);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [maxTextareaHeight, setMaxTextareaHeight] = useState<number | null>(null);
 
   if (!currentSession) return null;
 
@@ -61,6 +82,79 @@ export function ChatInput() {
     !isChat && regenerateImagePrompt != null && regenerateImagePrompt.sessionId === currentSession.id;
   const modelSettings = !isChat ? IMAGE_MODEL_SETTINGS[imageModel] : null;
   const imageSettings = !isChat ? getImageSettings(currentSession.id, imageModel) : null;
+  const sessionId = currentSession.id;
+  const attachmentItems = !isChat ? getAttachmentItems(sessionId) : [];
+  const attachmentCount = attachmentItems.length;
+  const referenceImageId = !isChat ? getReferenceImageId(sessionId) : null;
+  const referenceImageUrl = !isChat ? getReferenceImageUrl(sessionId) : null;
+  const hasReference = !isChat && (referenceImageId != null || referenceImageUrl != null);
+  const documents = isChat ? getDocuments(sessionId) : [];
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionStart, setMentionStart] = useState(0);
+
+  const getAttachmentPolicy = () => {
+    if (isChat) return { maxCount: 0, blockMessage: '' };
+    const isRegenLimited = isRegenerateImageMode;
+    if (imageModel === IMAGE_MODEL_ID_NANO_BANANA) {
+      const baseMax = hasReference ? 1 : 2;
+      return { maxCount: isRegenLimited ? Math.min(1, baseMax) : baseMax, blockMessage: '' };
+    }
+    if (imageModel === IMAGE_MODEL_ID_KLING) {
+      const baseMax = hasReference ? 0 : 1;
+      return {
+        maxCount: isRegenLimited ? Math.min(1, baseMax) : baseMax,
+        blockMessage: hasReference
+          ? 'Kling은 참조 이미지 사용 시 추가 첨부를 지원하지 않습니다. Nano Banana를 사용하세요.'
+          : 'Kling은 이미지 첨부를 1개까지만 지원합니다. 2개 첨부가 필요하면 Nano Banana를 사용하세요.',
+      };
+    }
+    if (imageModel === IMAGE_MODEL_ID_IMAGEN4 || imageModel === IMAGE_MODEL_ID_FLUX || imageModel === IMAGE_MODEL_ID_GEMINI) {
+      return {
+        maxCount: 0,
+        blockMessage: '이 모델은 이미지 첨부를 지원하지 않습니다. Nano Banana 또는 Kling을 사용하세요.',
+      };
+    }
+    return { maxCount: 0, blockMessage: '이 모델은 이미지 첨부를 지원하지 않습니다.' };
+  };
+
+  const attachmentPolicy = getAttachmentPolicy();
+  const maxAttachments = attachmentPolicy.maxCount;
+  const getModelInfoLines = () => {
+    if (isChat) return [];
+    if (imageModel === IMAGE_MODEL_ID_NANO_BANANA) {
+      return [
+        '참조 이미지 지원',
+        '참조 미사용: 이미지 첨부 최대 2개',
+        '참조 사용: 이미지 첨부 최대 1개',
+        '텍스트만 입력 시 Gemini 3 Pro TTI 사용',
+        '이미지 첨부/참조 사용 시 Nano Banana Pro Edit 사용',
+      ];
+    }
+    if (imageModel === IMAGE_MODEL_ID_KLING) {
+      return [
+        '참조 이미지 지원',
+        '참조 미사용: 이미지 1개 첨부 + 텍스트',
+        '참조 사용: 텍스트만 가능 (첨부 불가)',
+        '이미지 2개 이상 첨부는 미지원 — Nano Banana 권장',
+      ];
+    }
+    if (imageModel === IMAGE_MODEL_ID_GEMINI) {
+      return [
+        '텍스트 전용 또는 참조 1개 기반 생성',
+        '이미지 첨부 미지원',
+      ];
+    }
+    if (imageModel === IMAGE_MODEL_ID_IMAGEN4 || imageModel === IMAGE_MODEL_ID_FLUX) {
+      return [
+        '텍스트 전용 TTI',
+        '이미지 첨부 미지원 — Nano Banana/Kling 권장',
+      ];
+    }
+    return [];
+  };
+  const modelInfoLines = getModelInfoLines();
 
   useEffect(() => {
     if (regeneratePrompt?.sessionId === currentSession?.id) {
@@ -75,6 +169,61 @@ export function ChatInput() {
       inputRef.current?.focus();
     }
   }, [regenerateImagePrompt?.sessionId, regenerateImagePrompt?.prompt, currentSession?.id]);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const style = window.getComputedStyle(el);
+    const lineHeight = Number.parseFloat(style.lineHeight || '0') || 20;
+    const padTop = Number.parseFloat(style.paddingTop || '0') || 0;
+    const padBottom = Number.parseFloat(style.paddingBottom || '0') || 0;
+    setMaxTextareaHeight(lineHeight * 4 + padTop + padBottom);
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current || !onHeightChange) return;
+    const observer = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect?.height ?? 0;
+      onHeightChange(h);
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [onHeightChange]);
+
+  useEffect(() => {
+    if (!isChat) {
+      setMentionOpen(false);
+      setMentionQuery('');
+    }
+  }, [isChat]);
+
+  useEffect(() => {
+    if (isChat && currentSession) {
+      refreshDocuments(currentSession.id).catch(() => {});
+    }
+  }, [isChat, currentSession?.id, refreshDocuments]);
+
+  const updateMentionState = (value: string, caret: number) => {
+    if (!isChat) {
+      setMentionOpen(false);
+      return;
+    }
+    const upto = value.slice(0, caret);
+    const quotedMatch = /@"([^"]*)$/.exec(upto);
+    const match = /@([^\s@]*)$/.exec(upto);
+    const activeMatch = quotedMatch ?? match;
+    if (activeMatch) {
+      setMentionOpen(true);
+      setMentionQuery(activeMatch[1]);
+      const startIndex = activeMatch.index ?? (caret - activeMatch[1].length - 1);
+      setMentionStart(startIndex);
+      setMentionIndex(0);
+      refreshDocuments(sessionId).catch(() => {});
+    } else {
+      setMentionOpen(false);
+      setMentionQuery('');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,9 +242,22 @@ export function ChatInput() {
         showToast(result.message);
         return;
       }
+      if (attachmentCount > maxAttachments) {
+        showToast(attachmentPolicy.blockMessage || `이미지는 최대 ${maxAttachments}개까지 첨부 가능합니다.`);
+        return;
+      }
+      if (maxAttachments === 0 && attachmentCount > 0) {
+        showToast(attachmentPolicy.blockMessage || '이 모델은 이미지 첨부를 지원하지 않습니다.');
+        return;
+      }
+      if (attachmentItems.some((item) => !item.remoteUrl)) {
+        showToast('이미지 업로드가 완료될 때까지 기다려 주세요.');
+        return;
+      }
     }
 
     setPrompt('');
+    setMentionOpen(false);
     if (isRegenerateMode && currentSession) {
       clearRegeneratePrompt();
       await regenerateChat(currentSession.id, { prompt: text, model: chatModel });
@@ -107,6 +269,46 @@ export function ChatInput() {
     } else {
       await sendImageRequest(text, imageModel);
     }
+  };
+
+  const sortedDocuments = isChat
+    ? [...documents].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    : [];
+  const mentionCandidates = isChat
+    ? sortedDocuments.filter((doc) =>
+        doc.original_name.toLowerCase().includes(mentionQuery.toLowerCase())
+      )
+    : [];
+  const mentionVisible = mentionOpen && mentionCandidates.length > 0;
+
+  const selectMention = (docName: string) => {
+    const input = inputRef.current;
+    if (!input) return;
+    const caret = input.selectionStart ?? prompt.length;
+    const before = prompt.slice(0, mentionStart);
+    const after = prompt.slice(caret);
+    const insertion = /\\s/.test(docName) ? `@"${docName}"` : `@${docName}`;
+    const spacer = after.startsWith(' ') || after === '' ? ' ' : ' ';
+    const next = `${before}${insertion}${spacer}${after}`;
+    setPrompt(next);
+    setMentionOpen(false);
+    setMentionQuery('');
+    requestAnimationFrame(() => {
+      const pos = before.length + insertion.length + spacer.length;
+      input.setSelectionRange(pos, pos);
+      input.focus();
+    });
+  };
+
+  const formatDocTime = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const yy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${yy}-${mm}-${dd} ${hh}:${min}`;
   };
 
   const handleUploadReference = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,8 +331,63 @@ export function ChatInput() {
     }
   };
 
+  const handleUploadAttachments = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length || !currentSession || currentSession.kind !== 'image') return;
+    if (maxAttachments <= 0) {
+      showToast(attachmentPolicy.blockMessage || '이 모델은 이미지 첨부를 지원하지 않습니다.');
+      return;
+    }
+    if (files.some((f) => !f.type.startsWith('image/'))) {
+      showToast('이미지 파일만 업로드할 수 있습니다 (JPEG, PNG, WebP)');
+      return;
+    }
+    const remaining = maxAttachments - attachmentCount;
+    if (remaining <= 0) {
+      showToast(attachmentPolicy.blockMessage || `이미지는 최대 ${maxAttachments}개까지 첨부 가능합니다.`);
+      return;
+    }
+    const toUpload = files.slice(0, remaining);
+    const previewItems = toUpload.map((file) => ({
+      previewUrl: URL.createObjectURL(file),
+      status: 'uploading' as const,
+    }));
+    setUploadingAttachments(true);
+    updateAttachmentItems(sessionId, (prev) => [...prev, ...previewItems]);
+    try {
+      const { urls } = await chatApi.uploadImageAttachments(toUpload);
+      updateAttachmentItems(sessionId, (prev) => {
+        const urlMap = new Map(previewItems.map((item, idx) => [item.previewUrl, urls[idx]]));
+        return prev.map((item) => {
+          const remote = urlMap.get(item.previewUrl);
+          if (!remote) return item;
+          return { ...item, remoteUrl: remote, status: 'ready' };
+        });
+      });
+      if (files.length > remaining) {
+        showToast(attachmentPolicy.blockMessage || `이미지는 최대 ${maxAttachments}개까지 첨부 가능합니다.`);
+      }
+    } catch (err) {
+      updateAttachmentItems(sessionId, (prev) =>
+        prev.map((item) => (previewItems.some((p) => p.previewUrl === item.previewUrl) ? { ...item, status: 'error' } : item))
+      );
+      showToast(err instanceof Error ? err.message : '업로드 실패');
+    } finally {
+      setUploadingAttachments(false);
+    }
+  };
+
+  const handleAttachmentClick = () => {
+    if (maxAttachments <= 0) {
+      showToast(attachmentPolicy.blockMessage || '이 모델은 이미지 첨부를 지원하지 않습니다.');
+      return;
+    }
+    attachInputRef.current?.click();
+  };
+
   const supportsReference = !isChat && imageModelSupportsReference(imageModel);
-  const hasRefImage = !isChat && (getReferenceImageId(currentSession.id) != null || getReferenceImageUrl(currentSession.id) != null);
+  const hasRefImage = hasReference;
 
   const promptMaxLen = isChat
     ? (CHAT_PROMPT_MAX_LENGTH_BY_MODEL[chatModel] ?? CHAT_PROMPT_MAX_LENGTH)
@@ -140,11 +397,27 @@ export function ChatInput() {
 
   const { sidebarOpen } = useLayout();
 
+  const resizeTextarea = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const maxHeight = maxTextareaHeight ?? el.scrollHeight;
+    const next = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > next ? 'auto' : 'hidden';
+  };
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [prompt, maxTextareaHeight]);
+
   return (
       <div
+        ref={containerRef}
         className={`fixed bottom-0 right-0 p-4 transition-[left] duration-300 ease-out ${
           sidebarOpen ? 'left-72' : 'left-0'
         }`}
+        style={rightOffset > 0 ? { right: rightOffset } : undefined}
       >
       {error && (
         <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between rounded-lg bg-destructive/50 text-destructive-foreground px-3 py-2 text-sm animate-fade-in-up">
@@ -156,10 +429,52 @@ export function ChatInput() {
       )}
       <form
         onSubmit={handleSubmit}
-        className="max-w-3xl mx-auto rounded-2xl border border-border bg-background shadow-sm overflow-hidden animate-fade-in-up"
+        className="max-w-3xl mx-auto rounded-2xl border border-border bg-background shadow-sm overflow-visible animate-fade-in-up"
       >
         {/* 위쪽: 미디어 버튼 + 입력 + 전송 */}
         <div className="flex items-center gap-2 p-3">
+          {!isChat && (
+            <>
+              <input
+                ref={attachInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                multiple
+                onChange={handleUploadAttachments}
+                disabled={uploadingAttachments || sending}
+              />
+              <button
+                type="button"
+                onClick={handleAttachmentClick}
+                disabled={uploadingAttachments || sending}
+                className={`shrink-0 flex items-center justify-center w-11 h-11 rounded-xl border transition-colors duration-200 disabled:opacity-50 ${
+                  attachmentCount > 0
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+                title={
+                  attachmentCount > 0
+                    ? (maxAttachments > 0 ? `첨부 이미지 ${attachmentCount}/${maxAttachments}` : `첨부 이미지 ${attachmentCount}개`)
+                    : '이미지 첨부'
+                }
+                aria-label="이미지 첨부"
+              >
+                {uploadingAttachments ? <span className="text-xs">…</span> : <Paperclip size={18} />}
+              </button>
+              {attachmentCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => clearAttachmentItems(sessionId)}
+                  className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  aria-label="첨부 해제"
+                  title="첨부 해제"
+                >
+                  <X size={18} />
+                </button>
+              )}
+            </>
+          )}
           {supportsReference && (
             <>
               <input
@@ -206,11 +521,44 @@ export function ChatInput() {
             </>
           )}
           <div className="relative flex-1 flex items-center">
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
+              rows={1}
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setPrompt(value);
+                const caret = e.target.selectionStart ?? value.length;
+                updateMentionState(value, caret);
+                resizeTextarea();
+              }}
+              onKeyDown={(e) => {
+                if ((e.nativeEvent as KeyboardEvent).isComposing) return;
+                if (e.key === 'Enter' && !e.shiftKey && (!mentionOpen || mentionCandidates.length === 0)) {
+                  e.preventDefault();
+                  const form = (e.currentTarget as HTMLTextAreaElement).form;
+                  if (form) form.requestSubmit();
+                  return;
+                }
+                if (!mentionOpen || mentionCandidates.length === 0) return;
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMentionIndex((prev) => (prev + 1) % mentionCandidates.length);
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMentionIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const selected = mentionCandidates[mentionIndex];
+                  if (selected) selectMention(selected.original_name);
+                } else if (e.key === 'Tab') {
+                  e.preventDefault();
+                  const selected = mentionCandidates[mentionIndex];
+                  if (selected) selectMention(selected.original_name);
+                } else if (e.key === 'Escape') {
+                  setMentionOpen(false);
+                }
+              }}
               placeholder={
                 isRegenerateMode
                   ? '수정 후 Enter 또는 재질문 버튼으로 재생성'
@@ -220,7 +568,7 @@ export function ChatInput() {
                       ? '메시지를 입력하세요...'
                       : '이미지 설명을 입력하세요...'
               }
-              className="w-full min-h-[48px] py-2.5 pl-4 pr-12 text-base text-foreground placeholder-muted-foreground bg-muted/40 rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-colors duration-200"
+              className="w-full min-h-[48px] max-h-[160px] py-2.5 pl-4 pr-12 text-base text-foreground placeholder-muted-foreground bg-muted/40 rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-colors duration-200 resize-none leading-6"
               disabled={sending}
               maxLength={promptMaxLen}
               aria-invalid={isOverLimit}
@@ -234,6 +582,35 @@ export function ChatInput() {
               >
                 {prompt.length.toLocaleString()} / {(promptMaxLen / 1000).toFixed(0)}천
               </span>
+            )}
+            {mentionVisible && (
+              <div className="absolute left-0 right-0 bottom-full mb-2 z-20 rounded-xl border border-border bg-background shadow-lg overflow-hidden">
+                <div className="max-h-56 overflow-y-auto">
+                  {mentionCandidates.map((doc, idx) => (
+                    <button
+                      key={`${doc.id}-${doc.original_name}`}
+                      type="button"
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-muted/70 transition-colors ${
+                        idx === mentionIndex ? 'bg-muted/70' : ''
+                      }`}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        selectMention(doc.original_name);
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-foreground">{doc.original_name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {doc.status === 'completed' ? '완료' : doc.status === 'failed' ? '실패' : '처리 중'}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-muted-foreground">
+                        {formatDocTime(doc.created_at)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
           {sending ? (
@@ -292,6 +669,36 @@ export function ChatInput() {
             </button>
           )}
         </div>
+
+        {!isChat && attachmentCount > 0 && (
+          <div className="px-3 pb-2">
+            <div className="flex flex-wrap gap-2">
+              {attachmentItems.map((item, idx) => (
+                <div key={`${item.previewUrl}-${idx}`} className="relative w-16 h-16 rounded-lg border border-border overflow-hidden bg-muted/40">
+                  <img src={item.previewUrl || item.remoteUrl} alt={`attachment-${idx + 1}`} className="w-full h-full object-cover" />
+                  {item.status === 'uploading' && (
+                    <div className="absolute inset-0 bg-black/50 text-white text-[10px] flex items-center justify-center">
+                      업로드 중
+                    </div>
+                  )}
+                  {item.status === 'error' && (
+                    <div className="absolute inset-0 bg-destructive/70 text-destructive-foreground text-[10px] flex items-center justify-center">
+                      실패
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeAttachmentItem(sessionId, idx)}
+                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
+                    aria-label="첨부 이미지 삭제"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 아래쪽: 모델 + 설정 (펼침) */}
         <div className="flex flex-wrap items-center gap-2 px-3 pb-3 pt-0 border-t border-border/50 [&_select]:min-h-0 [&_select]:h-9 [&_select]:py-1.5 [&_select]:min-w-[160px]">
@@ -392,6 +799,16 @@ export function ChatInput() {
                 </div>
               </div>
             </>
+          )}
+          {!isChat && modelInfoLines.length > 0 && (
+            <div className="w-full flex items-start gap-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <Info size={14} className="mt-0.5" />
+              <div className="flex flex-col gap-1">
+                {modelInfoLines.map((line) => (
+                  <p key={line}>- {line}</p>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </form>

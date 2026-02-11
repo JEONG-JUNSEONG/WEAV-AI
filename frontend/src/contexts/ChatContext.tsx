@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { chatApi } from '@/services/api/chatApi';
 import { useApp } from './AppContext';
 import { getDefaultImageOptions, type ImageGenOptions } from '@/constants/models';
+import type { DocumentItem } from '@/types';
 
 const POLL_INTERVAL = 800;
 const POLL_MAX = 60;
@@ -41,6 +42,12 @@ type RegenerateChatOptions = { model?: string; prompt?: string };
 
 type RegeneratePromptState = { sessionId: number; prompt: string } | null;
 
+type AttachmentItem = {
+  previewUrl: string;
+  remoteUrl?: string;
+  status: 'uploading' | 'ready' | 'error';
+};
+
 type ChatContextValue = {
   sending: boolean;
   error: string | null;
@@ -69,9 +76,19 @@ type ChatContextValue = {
   /** 이미지 세션별 업로드한 참조 이미지 URL */
   getReferenceImageUrl: (sessionId: number) => string | null;
   setReferenceImageUrl: (sessionId: number, url: string | null) => void;
+  /** 이미지 세션별 첨부 이미지 URL 목록 */
+  getAttachmentItems: (sessionId: number) => AttachmentItem[];
+  updateAttachmentItems: (sessionId: number, updater: (items: AttachmentItem[]) => AttachmentItem[]) => void;
+  removeAttachmentItem: (sessionId: number, index: number) => void;
+  clearAttachmentItems: (sessionId: number) => void;
   /** 이미지 세션별 생성 옵션 (비율, 해상도, 포맷 등) */
   getImageSettings: (sessionId: number, modelId: string) => ImageGenOptions;
   setImageSettings: (sessionId: number, settings: Partial<ImageGenOptions>) => void;
+  /** 세션별 문서 목록 */
+  getDocuments: (sessionId: number) => DocumentItem[];
+  refreshDocuments: (sessionId: number) => Promise<DocumentItem[]>;
+  uploadDocument: (sessionId: number, file: File) => Promise<DocumentItem[]>;
+  deleteDocument: (sessionId: number, documentId: number) => Promise<DocumentItem[]>;
   clearError: () => void;
 };
 
@@ -87,7 +104,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [pendingImageRequest, setPendingImageRequest] = useState<{ sessionId: number; prompt: string } | null>(null);
   const [referenceImageIdBySession, setReferenceImageIdBySession] = useState<Record<number, number | null>>({});
   const [referenceImageUrlBySession, setReferenceImageUrlBySession] = useState<Record<number, string | null>>({});
+  const [attachmentItemsBySession, setAttachmentItemsBySession] = useState<Record<number, AttachmentItem[]>>({});
   const [imageSettingsBySession, setImageSettingsBySession] = useState<Record<number, Partial<ImageGenOptions>>>({});
+  const [documentsBySession, setDocumentsBySession] = useState<Record<number, DocumentItem[]>>({});
   const modelBySessionRef = useRef<SessionModels>({});
   modelBySessionRef.current = modelBySession;
 
@@ -136,6 +155,39 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setReferenceImageUrlBySession((prev) => ({ ...prev, [sessionId]: url }));
     if (url != null) setReferenceImageIdBySession((prev) => ({ ...prev, [sessionId]: null }));
   }, []);
+  const getAttachmentItems = useCallback(
+    (sessionId: number) => attachmentItemsBySession[sessionId] ?? [],
+    [attachmentItemsBySession]
+  );
+  const updateAttachmentItems = useCallback(
+    (sessionId: number, updater: (items: AttachmentItem[]) => AttachmentItem[]) => {
+      setAttachmentItemsBySession((prev) => {
+        const prevItems = prev[sessionId] ?? [];
+        const nextItems = updater(prevItems);
+        if (typeof URL !== 'undefined') {
+          const prevSet = new Set(prevItems.map((i) => i.previewUrl).filter(Boolean));
+          const nextSet = new Set(nextItems.map((i) => i.previewUrl).filter(Boolean));
+          prevSet.forEach((url) => {
+            if (!nextSet.has(url)) URL.revokeObjectURL(url);
+          });
+        }
+        return { ...prev, [sessionId]: nextItems };
+      });
+    },
+    []
+  );
+  const removeAttachmentItem = useCallback(
+    (sessionId: number, index: number) => {
+      updateAttachmentItems(sessionId, (prev) => prev.filter((_, i) => i !== index));
+    },
+    [updateAttachmentItems]
+  );
+  const clearAttachmentItems = useCallback(
+    (sessionId: number) => {
+      updateAttachmentItems(sessionId, () => []);
+    },
+    [updateAttachmentItems]
+  );
   const getImageSettings = useCallback((sessionId: number, modelId: string): ImageGenOptions => {
     const defaults = getDefaultImageOptions(modelId);
     const overrides = imageSettingsBySession[sessionId];
@@ -147,6 +199,30 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       [sessionId]: { ...prev[sessionId], ...settings },
     }));
   }, []);
+  const getDocuments = useCallback(
+    (sessionId: number) => documentsBySession[sessionId] ?? [],
+    [documentsBySession]
+  );
+  const refreshDocuments = useCallback(async (sessionId: number) => {
+    const docs = await chatApi.listDocuments(sessionId);
+    setDocumentsBySession((prev) => ({ ...prev, [sessionId]: docs }));
+    return docs;
+  }, []);
+  const uploadDocument = useCallback(async (sessionId: number, file: File) => {
+    await chatApi.uploadDocument(sessionId, file);
+    return refreshDocuments(sessionId);
+  }, [refreshDocuments]);
+  const deleteDocument = useCallback(
+    async (sessionId: number, documentId: number) => {
+      await chatApi.deleteDocument(sessionId, documentId);
+      setDocumentsBySession((prev) => ({
+        ...prev,
+        [sessionId]: (prev[sessionId] ?? []).filter((doc) => doc.id !== documentId),
+      }));
+      return refreshDocuments(sessionId);
+    },
+    [refreshDocuments]
+  );
 
   const pollJob = useCallback(
     async (taskId: string, sessionId: number) => {
@@ -205,7 +281,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   );
 
   const sendImageRequest = useCallback(
-    async (prompt: string, model: string, options?: { referenceImageId?: number; referenceImageUrl?: string } & Partial<ImageGenOptions>) => {
+    async (
+      prompt: string,
+      model: string,
+      options?: { referenceImageId?: number; referenceImageUrl?: string; imageUrls?: string[] } & Partial<ImageGenOptions>
+    ) => {
       if (!currentSession || currentSession.kind !== 'image') return;
       const sessionId = currentSession.id;
       abortRef.current = false;
@@ -214,6 +294,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setPendingImageRequest({ sessionId, prompt });
       const refUrl = options?.referenceImageUrl ?? referenceImageUrlBySession[sessionId] ?? null;
       const refId = refUrl == null ? (options?.referenceImageId ?? referenceImageIdBySession[sessionId] ?? null) : null;
+      const attachmentUrls =
+        options?.imageUrls ??
+        getAttachmentItems(sessionId)
+          .map((item) => item.remoteUrl)
+          .filter((u): u is string => Boolean(u));
       const settings = getImageSettings(sessionId, model);
       const merged = { ...settings, ...options };
       try {
@@ -222,6 +307,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           numImages: merged.num_images,
           ...(refUrl != null && refUrl !== '' && { referenceImageUrl: refUrl }),
           ...(refId != null && { referenceImageId: refId }),
+          ...(attachmentUrls.length > 0 && { imageUrls: attachmentUrls }),
           resolution: merged.resolution,
           outputFormat: merged.output_format,
           seed: merged.seed,
@@ -237,7 +323,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setSending(false);
       }
     },
-    [currentSession, getImageSettings, pollJob, refreshSession, referenceImageIdBySession, referenceImageUrlBySession]
+    [currentSession, getImageSettings, getAttachmentItems, pollJob, refreshSession, referenceImageIdBySession, referenceImageUrlBySession]
   );
 
   const regenerateChat = useCallback(
@@ -318,8 +404,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setReferenceImageId,
     getReferenceImageUrl,
     setReferenceImageUrl,
+    getAttachmentItems,
+    updateAttachmentItems,
+    removeAttachmentItem,
+    clearAttachmentItems,
     getImageSettings,
     setImageSettings,
+    getDocuments,
+    refreshDocuments,
+    uploadDocument,
+    deleteDocument,
     clearError: () => setError(null),
   };
 

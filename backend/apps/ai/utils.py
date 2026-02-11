@@ -1,9 +1,11 @@
+from typing import Optional, List
+
 from apps.chats.services import memory_service
 
 
-def get_rag_context_string(session_id: int, query: str, limit: int = 5, max_chars: int = 800) -> str:
+def get_rag_context_string(session_id: int, query: str, limit: int = 5, max_chars: int = 800, exclude_sources: Optional[List[str]] = None) -> str:
     """Returns a concise context string from RAG memories (e.g. for prepending to image prompt)."""
-    memories = memory_service.search_memory([session_id], query, limit=limit)
+    memories = memory_service.search_memory([session_id], query, limit=limit, exclude_sources=exclude_sources)
     if not memories:
         return ""
     items = []
@@ -23,6 +25,7 @@ def get_rag_enhanced_system_prompt(
     user_prompt: str,
     base_system_prompt: str = "You are a helpful AI assistant.",
     recent_conversation: str = "",
+    exclude_sources: Optional[List[str]] = None,
 ) -> str:
     """
     Constructs a system prompt with recent conversation, RAG context, and Visual Continuity instructions.
@@ -33,7 +36,7 @@ def get_rag_enhanced_system_prompt(
         recent_section = "## Recent conversation\n" + recent_conversation.strip() + "\n\n"
 
     # 1. Retrieve relevant memories (Shared Context potential here by expanding session_ids)
-    memories = memory_service.search_memory([session_id], user_prompt, limit=5)
+    memories = memory_service.search_memory([session_id], user_prompt, limit=5, exclude_sources=exclude_sources)
 
     # 2. Format memories
     memory_context = ""

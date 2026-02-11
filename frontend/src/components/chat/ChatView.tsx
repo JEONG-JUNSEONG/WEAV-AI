@@ -5,19 +5,60 @@ import { useChat } from '@/contexts/ChatContext';
 import { useToast } from '@/contexts/ToastContext';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
+import { DocumentPanel } from './DocumentPanel';
+import type { Citation } from '@/types';
+
+const DOC_PANEL_WIDTH = 352;
+const DOC_PANEL_MIN_WIDTH = 280;
+const DOC_PANEL_MAX_WIDTH = 780;
 
 export function ChatView() {
   const { currentSession } = useApp();
-  const { setRegeneratePrompt, setRegenerateImagePrompt, pendingImageRequest, sending, getReferenceImageId, setReferenceImageId } = useChat();
+  const {
+    setRegeneratePrompt,
+    setRegenerateImagePrompt,
+    pendingImageRequest,
+    sending,
+    getReferenceImageId,
+    setReferenceImageId,
+    getDocuments,
+    refreshDocuments,
+    uploadDocument,
+    deleteDocument,
+  } = useChat();
   const { showToast } = useToast();
   const endRef = useRef<HTMLDivElement>(null);
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  const [docPanelOpen, setDocPanelOpen] = useState(false);
+  const [docPanelWidth, setDocPanelWidth] = useState(DOC_PANEL_WIDTH);
+  const [activeDocId, setActiveDocId] = useState<number | null>(null);
+  const [activeCitations, setActiveCitations] = useState<Citation[] | null>(null);
+  const [activeCitationIndex, setActiveCitationIndex] = useState(0);
+  const [inputAreaHeight, setInputAreaHeight] = useState(0);
 
   const messageCount = currentSession?.messages?.length ?? 0;
   const imageRecordCount = currentSession?.image_records?.length ?? 0;
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messageCount, imageRecordCount]);
+
+  useEffect(() => {
+    if (currentSession?.kind === 'chat') {
+      refreshDocuments(currentSession.id).catch(() => {});
+    }
+    setActiveCitations(null);
+    setActiveCitationIndex(0);
+  }, [currentSession?.id, currentSession?.kind, refreshDocuments]);
+
+  useEffect(() => {
+    if (!currentSession || currentSession.kind !== 'chat') return;
+    if (activeCitations && activeCitations.length > 0) return;
+    const docs = getDocuments(currentSession.id);
+    if (activeDocId == null && docs.length > 0) {
+      setActiveDocId(docs[0].id);
+      setDocPanelOpen(true);
+    }
+  }, [currentSession, getDocuments, activeDocId, activeCitations]);
 
   if (!currentSession) {
     return (
@@ -37,10 +78,33 @@ export function ChatView() {
   const responseCount = messages.filter((m) => m.role === 'assistant').length;
   const imageRecords = currentSession.image_records ?? [];
   const referenceImageId = getReferenceImageId(currentSession.id);
+  const documents = isChat ? getDocuments(currentSession.id) : [];
+
+  const handleShowCitations = (citations: Citation[]) => {
+    if (!citations || citations.length === 0) return;
+    setActiveCitations(citations);
+    setActiveCitationIndex(0);
+    setActiveDocId(citations[0]?.document_id ?? null);
+    setDocPanelOpen(true);
+  };
+
+  const handleSelectDocument = (docId: number) => {
+    setActiveDocId(docId);
+    setActiveCitations(null);
+    setActiveCitationIndex(0);
+    setDocPanelOpen(true);
+  };
 
   return (
-    <div className="flex-1 flex flex-col w-full max-w-3xl mx-auto animate-fade-in">
-      <main className="flex-1 overflow-y-auto px-4 pt-6 pb-40">
+    <div
+      className="flex-1 flex flex-col w-full transition-[padding-right] duration-200 ease-out"
+      style={isChat && docPanelOpen ? { paddingRight: docPanelWidth } : undefined}
+    >
+      <div className="flex-1 flex flex-col w-full max-w-3xl mx-auto animate-fade-in">
+        <main
+          className="flex-1 overflow-y-auto px-4 pt-6"
+          style={{ paddingBottom: Math.max(160, inputAreaHeight + 24) }}
+        >
         {isChat ? (
           messages.length === 0 ? (
             <div className="text-center text-muted-foreground py-12 animate-fade-in-up">
@@ -65,6 +129,9 @@ export function ChatView() {
                   key={msg.id}
                   message={msg}
                   isLastUserMessage={isLastUserMessage}
+                  onShowCitations={handleShowCitations}
+                  documents={documents}
+                  onSelectDocument={handleSelectDocument}
                   onEditRequested={
                     isLastUserMessage && currentSession
                       ? (prompt) => setRegeneratePrompt(currentSession.id, prompt)
@@ -227,8 +294,47 @@ export function ChatView() {
           </>
         )}
         <div ref={endRef} />
-      </main>
-      <ChatInput />
+        </main>
+      </div>
+      <ChatInput
+        rightOffset={isChat && docPanelOpen ? docPanelWidth : 0}
+        onHeightChange={setInputAreaHeight}
+      />
+      {isChat && currentSession && (
+        <DocumentPanel
+          open={docPanelOpen}
+          onToggle={() => setDocPanelOpen((v) => !v)}
+          panelWidth={docPanelWidth}
+          minWidth={DOC_PANEL_MIN_WIDTH}
+          maxWidth={DOC_PANEL_MAX_WIDTH}
+          onResize={setDocPanelWidth}
+          documents={documents}
+          onRefresh={() => {
+            refreshDocuments(currentSession.id).catch(() => {});
+          }}
+          onUpload={(file) => {
+            uploadDocument(currentSession.id, file).catch(() => {});
+            setDocPanelOpen(true);
+          }}
+          onDelete={(docId) => {
+            deleteDocument(currentSession.id, docId).catch(() => {});
+            if (activeDocId === docId) {
+              setActiveDocId(null);
+            }
+            setActiveCitations(null);
+          }}
+          activeDocId={activeDocId}
+          onSelectDocument={(docId) => setActiveDocId(docId)}
+          citations={activeCitations}
+          activeCitationIndex={activeCitationIndex}
+          onSelectCitation={(idx) => {
+            setActiveCitationIndex(idx);
+            const cite = activeCitations?.[idx];
+            if (cite?.document_id) setActiveDocId(cite.document_id);
+          }}
+          onClearCitations={() => setActiveCitations(null)}
+        />
+      )}
       {/* 이미지 크게 보기 모달 */}
       {selectedImageUrl && (
         <div

@@ -65,11 +65,37 @@ body {
 }
 
 ::selection {
-  background: hsl(var(--secondary));
-  color: hsl(var(--foreground));
+  background: #000000;
+  color: #ffffff;
+}
+::-moz-selection {
+  background: #000000;
+  color: #ffffff;
 }
 
 /* Color system overrides - 라이트 테마 기준 */
+.text-black {
+  color: #ffffff !important;
+  background-color: #000000 !important;
+  border-radius: 3px;
+  padding: 0 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.text-black * {
+  color: #ffffff !important;
+}
+.text-black input,
+.text-black textarea,
+.text-black select,
+input.text-black,
+textarea.text-black,
+select.text-black {
+  color: #ffffff !important;
+  background-color: #000000 !important;
+  border-color: #000000 !important;
+  box-shadow: inset 0 0 0 1px #000000;
+}
 .text-slate-900 {
   color: #0f172a !important;
 }

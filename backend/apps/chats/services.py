@@ -1,21 +1,42 @@
 import os
 import logging
+import re
+import json
+from typing import Optional
 from openai import OpenAI
 from pgvector.django import CosineDistance
 from django.conf import settings
+from django.db.models import Case, IntegerField, Value, When
+from django.db.models.functions import Cast
 from .models import ChatMemory, Session
+try:
+    from apps.ai.router import run_chat
+except Exception:
+    run_chat = None
 
 logger = logging.getLogger(__name__)
 
 class ChatMemoryService:
     def __init__(self):
-        # Allow override via settings or env
-        api_key = getattr(settings, 'OPENAI_API_KEY', os.environ.get("OPENAI_API_KEY"))
+        # Use fal OpenRouter embeddings (OpenAI-compatible)
+        api_key = getattr(settings, 'FAL_KEY', os.environ.get("FAL_KEY"))
+        self.embedding_model = getattr(
+            settings,
+            'OPENROUTER_EMBEDDING_MODEL',
+            os.environ.get("OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small"),
+        )
+        self.rerank_enabled = os.environ.get("RERANK_ENABLED", "1") == "1"
+        self.rerank_model = os.environ.get("RERANK_MODEL", "openai/gpt-4o-mini")
+        self.rerank_max_candidates = int(os.environ.get("RERANK_MAX_CANDIDATES", "24"))
         if api_key:
-            self.client = OpenAI(api_key=api_key)
+            self.client = OpenAI(
+                base_url="https://fal.run/openrouter/router/openai/v1",
+                api_key="not-needed",
+                default_headers={"Authorization": f"Key {api_key}"},
+            )
         else:
             self.client = None
-            logger.warning("OPENAI_API_KEY not found. RAG functionality will be limited.")
+            logger.warning("FAL_KEY not found. RAG functionality will be limited.")
 
     def embed_text(self, text: str) -> list[float]:
         """Generates embedding for the given text using OpenAI."""
@@ -26,12 +47,64 @@ class ChatMemoryService:
         try:
             response = self.client.embeddings.create(
                 input=text,
-                model="text-embedding-3-small"
+                model=self.embedding_model
             )
             return response.data[0].embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             return [0.0] * 1536
+
+    def _tokenize_query(self, query: str) -> list[str]:
+        if not query:
+            return []
+        tokens = re.findall(r"[0-9]{4}[./-]?[0-9]{1,2}[./-]?[0-9]{1,2}|[A-Za-z0-9]+|[가-힣]+", query)
+        tokens = [t for t in tokens if len(t) >= 2]
+        extra: list[str] = []
+        if any(k in query for k in ("언제", "기간", "신청", "모집", "접수")):
+            extra += ["기간", "모집기간", "신청기간", "접수기간", "모집 기간", "신청 기간", "접수 기간"]
+        if any(k in query for k in ("여성", "여자", "남성", "남자")):
+            extra += ["여성", "여자", "남성", "남자", "남성만", "남자만"]
+        if "모집" in query:
+            extra += ["모집대상", "모집 대상"]
+        if any(k in query for k in ("취지", "목적", "의의", "목표")):
+            extra += [
+                "취지",
+                "목적",
+                "의의",
+                "목표",
+                "사업 목적",
+                "사업 취지",
+                "지원 목적",
+                "지원 취지",
+                "추진 목적",
+                "추진 취지",
+                "지원 계획",
+                "보조",
+                "지원",
+            ]
+        if any(k in query for k in ("사업", "지원", "보조")):
+            extra += [
+                "사업",
+                "지원사업",
+                "보조사업",
+                "지원 계획",
+                "지원 내용",
+                "사업 개요",
+                "사업 목적",
+                "추진 배경",
+            ]
+        if "자격" in query:
+            extra += ["자격", "대상", "요건"]
+        combined = tokens + extra
+        # dedupe while preserving order
+        seen = set()
+        unique = []
+        for t in combined:
+            if t in seen:
+                continue
+            seen.add(t)
+            unique.append(t)
+        return unique[:8]
 
     def add_memory(self, session_id: int, content: str, metadata: dict = None):
         """Adds a memory item to the vector store."""
@@ -46,15 +119,155 @@ class ChatMemoryService:
             metadata=metadata or {}
         )
 
-    def search_memory(self, session_ids: list[int], query: str, limit: int = 5):
-        """Retrieves relevant memories based on semantic similarity."""
-        embedding = self.embed_text(query)
+    def _keyword_search(self, qs, query: str, limit: int) -> tuple[list[ChatMemory], bool]:
+        tokens = self._tokenize_query(query)
+        if tokens:
+            score_expr = Value(0, output_field=IntegerField())
+            for token in tokens:
+                score_expr = score_expr + Case(
+                    When(content__icontains=token, then=Value(1)),
+                    default=Value(0),
+                    output_field=IntegerField(),
+                )
+            scored = qs.annotate(
+                score=score_expr,
+                page_num=Cast('metadata__page', IntegerField()),
+            ).order_by('-score', 'page_num', 'id')
+            results = list(scored[:limit])
+            if results and getattr(results[0], 'score', 0) > 0:
+                return results, True
+        results = list(
+            qs.annotate(
+                page_num=Cast('metadata__page', IntegerField()),
+            ).order_by('page_num', 'id')[:limit]
+        )
+        return results, False
 
+    def _rrf_merge(self, vector_results: list[ChatMemory], keyword_results: list[ChatMemory], k: int = 60) -> list[ChatMemory]:
+        if not vector_results and not keyword_results:
+            return []
+        scores: dict[int, float] = {}
+        items: dict[int, ChatMemory] = {}
+        for rank, item in enumerate(vector_results):
+            scores[item.id] = scores.get(item.id, 0.0) + 1.0 / (k + rank + 1)
+            items[item.id] = item
+        for rank, item in enumerate(keyword_results):
+            scores[item.id] = scores.get(item.id, 0.0) + 1.0 / (k + rank + 1)
+            items[item.id] = item
+        ranked_ids = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)
+        return [items[i] for i in ranked_ids]
+
+    def _rerank_with_llm(self, query: str, candidates: list[ChatMemory], limit: int) -> list[ChatMemory]:
+        if not self.rerank_enabled or not run_chat or not candidates:
+            return candidates[:limit]
+        if os.environ.get('FAL_KEY', '') == '':
+            return candidates[:limit]
+        top_k = min(len(candidates), self.rerank_max_candidates)
+        items = candidates[:top_k]
+        lines = []
+        for idx, item in enumerate(items, start=1):
+            snippet = (item.content or "").replace("\n", " ").strip()
+            if len(snippet) > 320:
+                snippet = snippet[:320] + "..."
+            page = (item.metadata or {}).get('page')
+            lines.append(f"[{idx}] (p.{page}) {snippet}")
+        system_prompt = (
+            "You are a ranking model. Return ONLY JSON with a single key 'ranking' "
+            "that lists the most relevant passage indices in descending order. "
+            "Example: {\"ranking\":[3,1,2]}. Do not include any other text."
+        )
+        prompt = f"Query: {query}\n\nPassages:\n" + "\n".join(lines)
+        try:
+            output = run_chat(prompt, model=self.rerank_model, system_prompt=system_prompt, temperature=0, max_tokens=200)
+            # Parse JSON
+            match = re.search(r"\{.*\}", output, re.S)
+            if match:
+                payload = json.loads(match.group(0))
+                ranking = payload.get("ranking", [])
+                ranked = []
+                seen = set()
+                for idx in ranking:
+                    if not isinstance(idx, int):
+                        continue
+                    if 1 <= idx <= len(items):
+                        item = items[idx - 1]
+                        if item.id in seen:
+                            continue
+                        seen.add(item.id)
+                        ranked.append(item)
+                if ranked:
+                    # append remaining in original order
+                    for item in items:
+                        if item.id not in seen:
+                            ranked.append(item)
+                    return ranked[:limit]
+        except Exception as e:
+            logger.warning(f"Rerank failed: {e}")
+        return candidates[:limit]
+
+    def search_memory(self, session_ids: list[int], query: str, limit: int = 5, document_id: Optional[int] = None, exclude_sources: Optional[list[str]] = None):
+        """Retrieves relevant memories based on semantic similarity."""
         # Filter by sessions
         qs = ChatMemory.objects.filter(session_id__in=session_ids)
+        if document_id is not None:
+            qs = qs.filter(metadata__document_id=document_id)
+        if exclude_sources:
+            qs = qs.exclude(metadata__source__in=exclude_sources)
 
+        if not self.client:
+            results, _ = self._keyword_search(qs, query, limit)
+            return results
+
+        candidate_limit = max(limit * 4, 20)
+        embedding = self.embed_text(query)
         # Order by Cosine Distance (smaller is closer)
-        return qs.order_by(CosineDistance('embedding', embedding))[:limit]
+        keyword_results, keyword_hit = self._keyword_search(qs, query, candidate_limit)
+        vector_results = list(qs.order_by(CosineDistance('embedding', embedding))[:candidate_limit])
+        if not vector_results:
+            return keyword_results
+
+        tokens = self._tokenize_query(query)
+        if tokens:
+            critical_tokens: list[str] = []
+            if any(k in query for k in ("남자", "남성", "여자", "여성")):
+                critical_tokens = ["남자", "남성", "남자만", "남성만", "여자", "여성", "여자만", "여성만"]
+            if any(k in query for k in ("취지", "목적", "의의", "목표")):
+                critical_tokens += [
+                    "취지",
+                    "목적",
+                    "의의",
+                    "목표",
+                    "사업 목적",
+                    "사업 취지",
+                    "지원 목적",
+                    "지원 취지",
+                    "추진 목적",
+                    "추진 취지",
+                    "지원 계획",
+                ]
+            best_score = 0
+            for item in vector_results:
+                content = (item.content or "")
+                score = sum(1 for token in tokens if token in content)
+                if score > best_score:
+                    best_score = score
+            if critical_tokens:
+                has_critical = any(
+                    any(token in (item.content or "") for token in critical_tokens)
+                    for item in vector_results
+                )
+                if not has_critical:
+                    if keyword_hit:
+                        return keyword_results[:limit]
+            if best_score == 0:
+                if keyword_hit:
+                    return keyword_results[:limit]
+
+        merged = self._rrf_merge(vector_results, keyword_results)
+        rerank_all = os.environ.get("RERANK_ALL", "0") == "1"
+        if self.rerank_enabled and (document_id is not None or rerank_all):
+            merged = self._rerank_with_llm(query, merged, limit)
+        return merged[:limit]
 
     def get_relevant_context(self, session_id: int, query: str, max_chars: int = 3000) -> str:
         """

@@ -93,10 +93,10 @@ TIME_ZONE = 'Asia/Seoul'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-MEDIA_URL = 'media/'
+MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -124,4 +124,5 @@ MINIO_ACCESS_KEY = config('MINIO_ACCESS_KEY', default='minioadmin')
 MINIO_SECRET_KEY = config('MINIO_SECRET_KEY', default='minioadmin')
 MINIO_BUCKET_NAME = config('MINIO_BUCKET_NAME', default='weav-ai')
 MINIO_USE_SSL = _bool(config('MINIO_USE_SSL', default=False))
-
+MINIO_PUBLIC_ENDPOINT = config('MINIO_PUBLIC_ENDPOINT', default=MINIO_ENDPOINT)
+MINIO_PUBLIC_USE_SSL = _bool(config('MINIO_PUBLIC_USE_SSL', default=MINIO_USE_SSL))

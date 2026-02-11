@@ -6,8 +6,6 @@ You are the Lead Scriptwriter for a YouTube channel with over 1 million subscrib
 Your goal is to write a script so engaging that viewers cannot skip a single second, regardless of the topic.
 `;
 
-const mockDelay = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms));
-
 function safeJsonParse<T>(str: string, fallback: T): T {
   try {
     const s = (str || '').trim().replace(/^```json?\s*|\s*```$/g, '');
@@ -163,6 +161,7 @@ export const splitScriptIntoScenes = async (fullScript: string) => {
  * 업로드된 레퍼런스 이미지 분석
  */
 export const analyzeReferenceImage = async (base64Image: string) => {
+  void base64Image;
   const sys = 'You describe the visual style of an image in one short sentence for use as an image generation prompt. Reply with plain text only.';
   const prompt = 'Describe the style of this reference image in one concise sentence (lighting, mood, colors, composition). No preamble.';
   try {

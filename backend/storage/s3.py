@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 class MinIOStorage:
     def __init__(self):
         self.endpoint_url = f"http{'s' if settings.MINIO_USE_SSL else ''}://{settings.MINIO_ENDPOINT}"
+        self.public_endpoint_url = f"http{'s' if settings.MINIO_PUBLIC_USE_SSL else ''}://{settings.MINIO_PUBLIC_ENDPOINT}"
         self.access_key = settings.MINIO_ACCESS_KEY
         self.secret_key = settings.MINIO_SECRET_KEY
         self.bucket_name = settings.MINIO_BUCKET_NAME
@@ -19,6 +20,15 @@ class MinIOStorage:
             aws_secret_access_key=self.secret_key,
             config=boto3.session.Config(signature_version='s3v4')
         )
+        self.public_client = self.client
+        if self.public_endpoint_url != self.endpoint_url:
+            self.public_client = boto3.client(
+                's3',
+                endpoint_url=self.public_endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                config=boto3.session.Config(signature_version='s3v4')
+            )
         
         try:
             self._ensure_bucket_exists()
@@ -36,7 +46,7 @@ class MinIOStorage:
                 logger.error(f"Failed to create bucket {self.bucket_name}: {e}")
                 raise
 
-    def upload_file(self, file_obj, filename: str) -> str:
+    def upload_file(self, file_obj, filename: str, content_type: str = 'application/pdf') -> str:
         """
         Uploads a file-like object to MinIO and returns the URL.
         """
@@ -45,7 +55,7 @@ class MinIOStorage:
                 file_obj,
                 self.bucket_name,
                 filename,
-                ExtraArgs={'ContentType': 'application/pdf'} # Assuming PDF for now, can be dynamic
+                ExtraArgs={'ContentType': content_type or 'application/octet-stream'}
             )
             # Generate URL (assuming public or presigned - for now simple concatenation for internal usage or public bucket)
             # If the bucket is private, we should use presigned URLs, but for this RAG pipeline
@@ -64,10 +74,10 @@ class MinIOStorage:
             # return url
             
             # Actually, better to return the presigned URL for safety
-            url = self.client.generate_presigned_url(
+            url = self.public_client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket_name, 'Key': filename},
-                ExpiresIn=3600
+                ExpiresIn=24 * 3600
             )
             logger.info(f"Successfully uploaded {filename} to MinIO.")
             return url
@@ -84,6 +94,30 @@ class MinIOStorage:
             return response['Body'].read()
         except Exception as e:
             logger.error(f"Failed to download {filename} from MinIO: {e}")
+            raise
+
+    def get_presigned_url(self, filename: str, expires_in: int = 3600) -> str:
+        """
+        Returns a presigned URL for a given object key.
+        """
+        try:
+            return self.client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': filename},
+                ExpiresIn=expires_in
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL for {filename}: {e}")
+            raise
+
+    def delete_file(self, filename: str):
+        """
+        Deletes a file from MinIO.
+        """
+        try:
+            self.client.delete_object(self.bucket_name, filename)
+        except Exception as e:
+            logger.error(f"Failed to delete {filename} from MinIO: {e}")
             raise
 
 minio_client = MinIOStorage()

@@ -1,11 +1,41 @@
 from rest_framework import serializers
-from .models import Session, Message, ImageRecord
+from django.urls import reverse
+from .models import Session, Message, ImageRecord, Document
 
 
 class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
-        fields = ('id', 'role', 'content', 'created_at')
+        fields = ('id', 'role', 'content', 'citations', 'created_at')
+
+
+class DocumentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    original_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Document
+        fields = ('id', 'original_name', 'status', 'file_url', 'error_message', 'created_at', 'updated_at')
+
+    def get_original_name(self, obj):
+        return obj.original_name or obj.file_name
+
+    def get_file_url(self, obj):
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        if request:
+            try:
+                url = reverse('session_document_file', args=[obj.session_id, obj.id])
+                return request.build_absolute_uri(url)
+            except Exception:
+                pass
+        try:
+            from storage.s3 import minio_client
+            if minio_client:
+                key = obj.pdf_file_name or obj.file_name
+                return minio_client.get_presigned_url(key)
+        except Exception:
+            pass
+        return obj.file_url
 
 
 class ImageRecordSerializer(serializers.ModelSerializer):

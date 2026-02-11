@@ -1,9 +1,37 @@
 const BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 import { api } from './apiClient';
-import type { JobStatus } from '@/types';
+import type { JobStatus, DocumentItem } from '@/types';
 
 export const chatApi = {
+  listDocuments: (sessionId: number) =>
+    api.get<DocumentItem[]>(`/api/v1/sessions/${sessionId}/documents/`),
+  deleteDocument: (sessionId: number, documentId: number) =>
+    api.delete(`/api/v1/sessions/${sessionId}/documents/${documentId}/`),
+  uploadDocument: (sessionId: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const url = `${BASE}/api/v1/sessions/${sessionId}/upload/`;
+    return fetch(url, { method: 'POST', body: form }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error((err as { detail?: string }).detail || res.statusText);
+      }
+      return res.json() as Promise<{ document_id: number; original_name: string; status: string; file_url: string }>;
+    });
+  },
+  uploadImageAttachments: (files: File[]) => {
+    const form = new FormData();
+    files.forEach((f) => form.append('images', f));
+    const url = `${BASE}/api/v1/chat/image/upload-attachments/`;
+    return fetch(url, { method: 'POST', body: form }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error((err as { detail?: string }).detail || res.statusText);
+      }
+      return res.json() as Promise<{ urls: string[] }>;
+    });
+  },
   uploadReferenceImage: (file: File) => {
     const form = new FormData();
     form.append('image', file);
@@ -40,6 +68,7 @@ export const chatApi = {
       numImages?: number;
       referenceImageId?: number;
       referenceImageUrl?: string;
+      imageUrls?: string[];
       resolution?: string;
       outputFormat?: string;
       seed?: number;
@@ -53,6 +82,7 @@ export const chatApi = {
       num_images: options?.numImages ?? 1,
       ...(options?.referenceImageId != null && { reference_image_id: options.referenceImageId }),
       ...(options?.referenceImageUrl != null && options.referenceImageUrl !== '' && { reference_image_url: options.referenceImageUrl }),
+      ...(options?.imageUrls != null && options.imageUrls.length > 0 && { image_urls: options.imageUrls }),
       ...(options?.resolution != null && options.resolution !== '' && { resolution: options.resolution }),
       ...(options?.outputFormat != null && options.outputFormat !== '' && { output_format: options.outputFormat }),
       ...(options?.seed != null && { seed: options.seed }),

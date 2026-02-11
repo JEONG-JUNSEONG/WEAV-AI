@@ -8,11 +8,18 @@ export const CHAT_MODELS: ChatModel[] = [
   { id: 'openai/gpt-5-chat', name: 'GPT-5 Chat', provider: 'OpenAI' },
 ];
 
+export const IMAGE_MODEL_ID_IMAGEN4 = 'fal-ai/imagen4/preview';
+export const IMAGE_MODEL_ID_FLUX = 'fal-ai/flux-pro/v1.1-ultra';
+export const IMAGE_MODEL_ID_GEMINI = 'fal-ai/gemini-3-pro-image-preview';
+export const IMAGE_MODEL_ID_KLING = 'kling-ai/kling-v1';
+export const IMAGE_MODEL_ID_NANO_BANANA = 'fal-ai/nano-banana-pro';
+
 export const IMAGE_MODELS: ImageModel[] = [
-  { id: 'fal-ai/imagen4/preview', name: 'Imagen 4 (Google)', provider: 'Google' },
-  { id: 'fal-ai/flux-pro/v1.1-ultra', name: 'FLUX Pro v1.1 Ultra', provider: 'fal.ai' },
-  { id: 'fal-ai/gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image Preview', provider: 'Google' },
-  { id: 'kling-ai/kling-v1', name: 'Kling', provider: 'Kling' },
+  { id: IMAGE_MODEL_ID_IMAGEN4, name: 'Imagen 4 (Google)', provider: 'Google' },
+  { id: IMAGE_MODEL_ID_FLUX, name: 'FLUX Pro v1.1 Ultra', provider: 'fal.ai' },
+  { id: IMAGE_MODEL_ID_GEMINI, name: 'Gemini 3 Pro Image Preview', provider: 'Google' },
+  { id: IMAGE_MODEL_ID_NANO_BANANA, name: 'Nano Banana Pro', provider: 'Google' },
+  { id: IMAGE_MODEL_ID_KLING, name: 'Kling', provider: 'Kling' },
 ];
 
 export type ImageModelSettings = {
@@ -24,27 +31,34 @@ export type ImageModelSettings = {
 };
 
 export const IMAGE_MODEL_SETTINGS: Record<string, ImageModelSettings> = {
-  'fal-ai/imagen4/preview': {
+  [IMAGE_MODEL_ID_IMAGEN4]: {
     aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
     resolutions: ['1K', '2K'],
     outputFormats: ['png', 'jpeg', 'webp'],
     numImagesMax: 4,
     supportsSeed: false,
   },
-  'fal-ai/flux-pro/v1.1-ultra': {
+  [IMAGE_MODEL_ID_FLUX]: {
     aspectRatios: ['21:9', '16:9', '4:3', '3:2', '1:1', '2:3', '3:4', '9:16', '9:21'],
     outputFormats: ['jpeg', 'png'],
     numImagesMax: 4,
     supportsSeed: false,
   },
-  'fal-ai/gemini-3-pro-image-preview': {
+  [IMAGE_MODEL_ID_GEMINI]: {
     aspectRatios: ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16'],
     resolutions: ['1K', '2K', '4K'],
     outputFormats: ['png', 'jpeg', 'webp'],
     numImagesMax: 4,
     supportsSeed: true,
   },
-  'kling-ai/kling-v1': {
+  [IMAGE_MODEL_ID_NANO_BANANA]: {
+    aspectRatios: ['21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16'],
+    resolutions: ['1K', '2K', '4K'],
+    outputFormats: ['png', 'jpeg', 'webp'],
+    numImagesMax: 4,
+    supportsSeed: true,
+  },
+  [IMAGE_MODEL_ID_KLING]: {
     aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'],
     numImagesMax: 4,
     supportsSeed: true,
@@ -71,8 +85,9 @@ export function getDefaultImageOptions(modelId: string): ImageGenOptions {
 
 /** 참조 이미지(업로드·선택)를 지원하는 이미지 모델 ID */
 export const IMAGE_MODELS_SUPPORT_REFERENCE = [
-  'fal-ai/gemini-3-pro-image-preview',
-  'kling-ai/kling-v1',
+  IMAGE_MODEL_ID_GEMINI,
+  IMAGE_MODEL_ID_KLING,
+  IMAGE_MODEL_ID_NANO_BANANA,
 ] as const;
 
 export function imageModelSupportsReference(modelId: string): boolean {
@@ -98,10 +113,11 @@ export const CHAT_PROMPT_MAX_LENGTH_BY_MODEL: Record<string, number> = {
 
 /** 모델별 이미지 프롬프트 최대 길이 (없으면 공통값 사용) */
 export const IMAGE_PROMPT_MAX_LENGTH_BY_MODEL: Record<string, number> = {
-  'fal-ai/imagen4/preview': 10_000,
-  'fal-ai/flux-pro/v1.1-ultra': 10_000,
-  'fal-ai/gemini-3-pro-image-preview': 10_000,
-  'kling-ai/kling-v1': 10_000,
+  [IMAGE_MODEL_ID_IMAGEN4]: 10_000,
+  [IMAGE_MODEL_ID_FLUX]: 10_000,
+  [IMAGE_MODEL_ID_GEMINI]: 10_000,
+  [IMAGE_MODEL_ID_NANO_BANANA]: 10_000,
+  [IMAGE_MODEL_ID_KLING]: 10_000,
 };
 
 export type PromptValidationResult = { valid: true } | { valid: false; message: string };

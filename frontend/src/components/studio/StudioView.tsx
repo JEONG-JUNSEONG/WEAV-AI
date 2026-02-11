@@ -1,26 +1,21 @@
 
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext, useMemo } from 'react';
-import { 
-  Search, X, Info, Rocket, History, Ghost, BookOpen, Lightbulb, 
-  TrendingUp, Globe, MonitorPlay, ChevronRight, Flame, Lock, 
-  Loader2, CheckCircle2, PlayCircle, Layers, Trash2, Link as LinkIcon,
-  Sparkles, Clock, LayoutDashboard, Target, Cpu, 
-  AlertTriangle, Terminal, ShieldCheck, Image as ImageIcon, Type,
-  Video, Wand2, Eye, MessageSquare, Camera, Plus, ChevronDown, ChevronUp,
-  Mic2, FileText, AlignLeft, Settings2, Sliders, ArrowUp, ArrowDown, Users,
-  Music4, Activity, Smartphone, Monitor, PenTool, Share2, RefreshCcw, Utensils,
-  MessageCircle, GripVertical, Zap, Hash, Compass, Sword, Microscope, Palette,
-  Map, Film, Church, Heart, FileUp, FileType, Star, Gift, Laptop, Leaf, Coffee, Smile,
-  BarChart3, Fingerprint, ClipboardCheck, Quote, ChevronLeft, Box, Boxes, Wand, UploadCloud, EyeOff, CheckSquare, Edit3, ImagePlus, ScanLine
+import {
+  X, History, Ghost, BookOpen, TrendingUp, Globe, MonitorPlay, ChevronRight, Flame, Loader2,
+  CheckCircle2, PlayCircle, Layers, Trash2, Link as LinkIcon, Sparkles, Target, Terminal,
+  Image as ImageIcon, Video, Wand2, Camera, Plus, Mic2, FileText, AlignLeft, Settings2,
+  Sliders, Music4, Activity, Smartphone, Monitor, PenTool, RefreshCcw, Utensils,
+  MessageCircle, Zap, Hash, Compass, Sword, Microscope, Palette, Map, Film, Heart, Gift,
+  Leaf, Smile, BarChart3, ChevronLeft, Box, CheckSquare, ImagePlus, ScanLine
 } from 'lucide-react';
 import { StudioGlobalContextType, StudioScene, StudioScriptSegment, StudioAnalysisResult, StudioScriptPlanningData } from '@/types/studio';
 import { 
-  analyzeTopic, analyzeUrlPattern, generateTopics, generatePlanningStep, 
+  analyzeUrlPattern, generateTopics, generatePlanningStep, 
   synthesizeMasterScript, splitScriptIntoScenes, generateSceneImage,
   analyzeReferenceImage, generateScenePrompt, generateMetaData, generateBenchmarkThumbnail
 } from '@/services/studio/geminiService';
 import { studioTts } from '@/services/studio/studioFalApi';
-import { fetchTrendingByCategory, formatTrendingGrowth, type TrendingItemWithCategory, type TrendTemplate } from '@/services/studio/trendingApi';
+import { fetchTrendingByCategory, formatTrendingGrowth, type TrendingItemWithCategory } from '@/services/studio/trendingApi';
 
 // --- [전역 상태 관리] ---
 const GlobalContext = createContext<StudioGlobalContextType | undefined>(undefined);
@@ -228,73 +223,6 @@ const SectionHeader = ({
   </div>
 );
 
-// --- [사이드바] ---
-const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean, toggleSidebar: () => void }) => {
-  const { currentStep, setCurrentStep, isDevMode, setIsDevMode } = useGlobal();
-  const steps = [
-    { id: 1, name: '1. 기획 및 전략 분석', icon: <Target size={18}/> },
-    { id: 2, name: '2. 영상 주제 선정', icon: <Sparkles size={18}/> },
-    { id: 3, name: '3. 대본 구조 설계', icon: <PenTool size={18}/> },
-    { id: 4, name: '4. 이미지 및 대본 생성', icon: <ImageIcon size={18}/> },
-    { id: 5, name: '5. AI 음성 합성', icon: <Mic2 size={18}/> },
-    { id: 6, name: '6. AI 영상 생성', icon: <Video size={18}/> },
-    { id: 7, name: '7. 최적화 메타 설정', icon: <Monitor size={18}/> },
-    { id: 8, name: '8. 썸네일 연구소', icon: <ImageIcon size={18}/> }
-  ];
-
-  return (
-    <>
-      {isOpen && <div className="fixed inset-0 bg-black/40 z-[45] backdrop-blur-sm lg:hidden" onClick={toggleSidebar} />}
-      <aside className={`fixed lg:static inset-y-0 left-0 w-72 bg-white border-r border-slate-200 flex flex-col z-50 transition-all duration-300 shadow-2xl lg:shadow-none ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} shrink-0`}>
-        <div className="h-32 px-12 border-b border-slate-100 flex items-center justify-center">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center">
-              <Zap size={18} fill="currentColor" className="text-yellow-400" />
-            </div>
-            <div className="flex flex-col">
-              <span className="ui-label">WEAV STUDIO</span>
-              <span className="font-serif text-lg text-slate-900">Creative Suite</span>
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-2 scrollbar-hide">
-          {steps.map(s => {
-            const isActive = currentStep === s.id;
-            const isLocked = !isDevMode && s.id > currentStep;
-            return (
-              <div
-                key={s.id}
-                className={`group flex items-center gap-7 px-12 py-6 cursor-pointer transition-all duration-500 relative ${isActive ? 'bg-slate-50/70' : isLocked ? 'opacity-20 cursor-not-allowed' : 'hover:bg-slate-50/40'}`}
-                onClick={() => !isLocked && (setCurrentStep(s.id), window.innerWidth < 1024 && toggleSidebar())}
-              >
-                <div className={`w-11 h-11 rounded-[1.2rem] flex items-center justify-center text-[13px] font-black border-2 transition-all duration-500 ${isActive ? 'bg-slate-900 border-slate-900 text-white shadow-xl rotate-6' : 'bg-white border-slate-200 text-slate-700 group-hover:text-slate-900'}`}>
-                  {isLocked ? <Lock size={12} /> : s.id}
-                </div>
-                <div className="flex-1 flex flex-col">
-                  <span className={`text-[14px] font-black uppercase tracking-tight transition-colors duration-300 ${isActive ? 'text-slate-900 italic' : 'text-slate-700 group-hover:text-slate-900'}`}>{s.name}</span>
-                  {isActive && <div className="h-[2.5px] w-full bg-rose-600 mt-1.5 animate-in slide-in-from-left duration-700 shadow-lg shadow-rose-200" />}
-                </div>
-                {isActive && <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-12 bg-rose-600 rounded-l-full shadow-xl shadow-rose-200" />}
-              </div>
-            );
-          })}
-        </nav>
-
-        <div className="p-12 border-t border-slate-100 flex items-center justify-between bg-slate-50/30">
-          <button onClick={() => setIsDevMode(!isDevMode)} className={`p-4 rounded-[1.2rem] transition-all duration-500 shadow-sm border ${isDevMode ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white text-slate-700 border-slate-200 hover:text-slate-900'}`}>
-            <Terminal size={20} />
-          </button>
-          <div className="flex flex-col items-end">
-            <p className={`text-[10px] font-black uppercase tracking-widest leading-none ${isDevMode ? 'text-slate-900' : 'text-slate-700'}`}>Workspace Status</p>
-            <p className="text-[9px] text-slate-700 font-bold mt-2 tracking-tighter italic">V 1.2 PRO STABLE</p>
-          </div>
-        </div>
-      </aside>
-    </>
-  );
-};
-
 // --- [Step 1: 기획 및 전략 분석] ---
 const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) => {
   const { 
@@ -306,7 +234,6 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
   const [selectedBenchmarkPatterns, setSelectedBenchmarkPatterns] = useState<string[]>([]);
 
   const [templateMode, setTemplateMode] = useState<'mainstream' | 'niche'>('mainstream');
-  const [trendDisplayFilter, setTrendDisplayFilter] = useState<TrendTemplate>('all');
   const [trendPeriod, setTrendPeriod] = useState<'monthly' | 'weekly'>('monthly');
   const [trendDataRaw, setTrendDataRaw] = useState<TrendingItemWithCategory[] | null>(null);
   const [trendError, setTrendError] = useState<string | null>(null);
@@ -396,26 +323,6 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
     { id: '9:16', label: '세로형', sub: 'Shorts / Reels', icon: <Smartphone size={16} /> },
     { id: '16:9', label: '가로형', sub: 'YouTube / Standard', icon: <Monitor size={16} /> }
   ];
-
-  const runTopicAnalysis = async () => {
-    const triggerValue = inputMode === 'tag' ? activeTags.join(', ') : descriptionInput.trim();
-    if (triggerValue.length < 2) return showToast("분석할 내용을 입력해주세요.");
-
-    setAnalysisResult(p => ({ ...p, isAnalyzing: true, error: null }));
-    try {
-      const res = await analyzeTopic(triggerValue, inputMode);
-      setAnalysisResult(prev => ({
-        ...prev,
-        isAnalyzing: false,
-        niche: res.niche,
-        trending: res.trending,
-        confidence: res.confidence
-      }));
-    } catch (err) {
-      setAnalysisResult(p => ({ ...p, isAnalyzing: false, error: "분석 실패" }));
-      showToast("분석 엔진 호출 중 오류가 발생했습니다.");
-    }
-  };
 
   const runUrlAnalysis = async (url: string) => {
     const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|youtube\.com\/shorts)\/.+$/;
@@ -512,8 +419,8 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
                 <div className="wf-subhead">
                   <span>시장 카테고리</span>
                   <div className="planner-toggle">
-                    <button onClick={() => { setTemplateMode('mainstream'); setTrendDisplayFilter('mainstream'); }} className={`planner-toggle__item ${templateMode === 'mainstream' ? 'is-active' : ''}`}>인기</button>
-                    <button onClick={() => { setTemplateMode('niche'); setTrendDisplayFilter('niche'); }} className={`planner-toggle__item ${templateMode === 'niche' ? 'is-active' : ''}`}>틈새</button>
+                    <button onClick={() => setTemplateMode('mainstream')} className={`planner-toggle__item ${templateMode === 'mainstream' ? 'is-active' : ''}`}>인기</button>
+                    <button onClick={() => setTemplateMode('niche')} className={`planner-toggle__item ${templateMode === 'niche' ? 'is-active' : ''}`}>틈새</button>
                   </div>
                 </div>
                 <div className="planner-chips">
@@ -725,7 +632,7 @@ const TopicGenerationStep = ({ showToast }: { showToast: (msg: string) => void }
 // --- [Step 3: 대본 아키텍처] ---
 const ScriptPlanningStep = () => {
   const { 
-    selectedTopic, scriptStyle, setScriptStyle, scriptLength, setScriptLength,
+    selectedTopic, scriptStyle, setScriptStyle, scriptLength,
     planningData, setPlanningData, setCurrentStep,
     masterScript, setMasterScript
   } = useGlobal();
@@ -1183,7 +1090,10 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
 
   const generateAll = async () => {
     if (scenes.length === 0) return;
-    const toGenerate = scenes.map((s, i) => i).filter(i => !scenes[i].imageUrl);
+    const toGenerate = scenes
+      .map((scene, i) => ({ scene, i }))
+      .filter(({ scene }) => !scene.imageUrl)
+      .map(({ i }) => i);
     if (toGenerate.length === 0) return showToast("생성할 이미지가 없습니다.");
     setIsGeneratingAll(true);
     setGenerateAllProgress(`(0/${toGenerate.length})`);
@@ -1607,7 +1517,7 @@ const VideoStep = () => {
           <div className="ui-card">
             <span className="ui-label">타임라인 (목업)</span>
             <div className="flex gap-2 mt-3 overflow-x-auto pb-2">
-              {timeline.map((clip, idx) => (
+              {timeline.map((clip) => (
                 <div
                   key={clip.id}
                   className="flex-shrink-0 w-24 aspect-video rounded-xl border border-slate-200 bg-slate-50 flex flex-col items-center justify-center"
@@ -1934,17 +1844,6 @@ const AppContent = ({ projectName }: { projectName: string }) => {
     reader.readAsText(file);
   };
 
-  const stepTitles = [
-    '1. 기획 및 전략 분석',
-    '2. 영상 주제 선정',
-    '3. 대본 구조 설계',
-    '4. 이미지 및 대본 생성',
-    '5. AI 음성 합성',
-    '6. AI 영상 생성',
-    '7. 최적화 메타 설정',
-    '8. 썸네일 연구소'
-  ];
-
   const topSteps = [
     { id: 1, label: '기획', icon: <Target size={14}/> },
     { id: 2, label: '주제', icon: <Sparkles size={14}/> },
@@ -1977,6 +1876,12 @@ const AppContent = ({ projectName }: { projectName: string }) => {
             <div className="w-2 h-2 rounded-full bg-rose-500" />
             {String(toast)}
           </div>
+        </div>
+      )}
+
+      {isGlobalDragging && (
+        <div className="absolute inset-0 z-[90] bg-slate-900/30 backdrop-blur-sm flex items-center justify-center text-white text-sm font-medium">
+          파일을 놓아 업로드하세요
         </div>
       )}
 

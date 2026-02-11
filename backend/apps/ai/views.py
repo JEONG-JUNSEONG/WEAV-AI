@@ -2,7 +2,6 @@ import logging
 import uuid
 from pathlib import Path
 
-from django.conf import settings
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -11,8 +10,15 @@ from rest_framework.response import Response
 
 from apps.chats.models import Session, Message, Job, SESSION_KIND_CHAT, SESSION_KIND_IMAGE
 from apps.chats.serializers import MessageSerializer, ImageRecordSerializer
+from storage.s3 import minio_client
 from .schemas import TextGenerationRequest, ImageGenerationRequest
-from .router import IMAGE_MODEL_GOOGLE
+from .router import (
+    IMAGE_MODEL_GOOGLE,
+    IMAGE_MODEL_FLUX,
+    IMAGE_MODEL_KLING,
+    IMAGE_MODEL_GEMINI3_PRO_IMAGE,
+    IMAGE_MODEL_NANO_BANANA,
+)
 from . import tasks
 
 
@@ -71,15 +77,46 @@ def complete_image(request):
         new_title = (body.prompt.strip() or session.title)[:255]
         session.title = new_title
         session.save(update_fields=['title', 'updated_at'])
+    image_urls = body.image_urls or []
+    image_urls = [u for u in image_urls if isinstance(u, str) and u.strip()]
+    has_reference = bool(body.reference_image_id or body.reference_image_url)
+    model = body.model or IMAGE_MODEL_GOOGLE
+
+    if image_urls:
+        if model in (IMAGE_MODEL_GOOGLE, IMAGE_MODEL_FLUX, IMAGE_MODEL_GEMINI3_PRO_IMAGE):
+            return Response(
+                {'detail': '이 모델은 이미지 첨부를 지원하지 않습니다. Nano Banana 또는 Kling을 사용하세요.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if model == IMAGE_MODEL_KLING:
+            if has_reference:
+                return Response(
+                    {'detail': 'Kling은 참조 이미지 사용 시 추가 첨부를 지원하지 않습니다. Nano Banana를 사용하세요.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if len(image_urls) > 1:
+                return Response(
+                    {'detail': 'Kling은 이미지 첨부를 1개까지만 지원합니다. Nano Banana를 사용하세요.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if model == IMAGE_MODEL_NANO_BANANA:
+            max_allowed = 1 if has_reference else 2
+            if len(image_urls) > max_allowed:
+                return Response(
+                    {'detail': f'Nano Banana는 이미지 첨부를 최대 {max_allowed}개까지 지원합니다.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
     job = Job.objects.create(session=session, kind='image', status='pending')
     task = tasks.task_image.delay(
         job.id,
         prompt=body.prompt,
-        model=body.model or IMAGE_MODEL_GOOGLE,
+        model=model,
         aspect_ratio=body.aspect_ratio,
         num_images=body.num_images,
         reference_image_id=body.reference_image_id,
         reference_image_url=body.reference_image_url,
+        image_urls=image_urls,
         resolution=body.resolution,
         output_format=body.output_format,
         seed=body.seed,
@@ -112,16 +149,47 @@ def upload_reference_image(request):
     ext = Path(f.name).suffix or '.png'
     if ext.lower() not in ('.jpg', '.jpeg', '.png', '.webp'):
         ext = '.png'
-    ref_dir = Path(settings.MEDIA_ROOT) / 'ref_uploads'
-    ref_dir.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
-    path = ref_dir / name
-    with open(path, 'wb') as out:
-        for chunk in f.chunks():
-            out.write(chunk)
-    rel_url = f"{settings.MEDIA_URL}ref_uploads/{name}"
-    url = request.build_absolute_uri(rel_url)
+    key = f"ref_uploads/{name}"
+    try:
+        f.seek(0)
+    except Exception:
+        pass
+    url = minio_client.upload_file(f.file, key, content_type=f.content_type)
     return Response({'url': url}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+def upload_attachment_images(request):
+    """첨부 이미지 업로드. multipart file 'images' (1~2개). 반환: { urls: [..] }"""
+    files = request.FILES.getlist('images')
+    if not files:
+        return Response({'detail': 'images files required'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(files) > 2:
+        return Response({'detail': '이미지는 최대 2개까지 업로드할 수 있습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    urls = []
+    for f in files:
+        if f.content_type not in ALLOWED_REFERENCE_IMAGE_TYPES:
+            return Response(
+                {'detail': f'Allowed types: {", ".join(ALLOWED_REFERENCE_IMAGE_TYPES)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if f.size > MAX_REFERENCE_IMAGE_SIZE:
+            return Response({'detail': 'File too large (max 10MB)'}, status=status.HTTP_400_BAD_REQUEST)
+        ext = Path(f.name).suffix or '.png'
+        if ext.lower() not in ('.jpg', '.jpeg', '.png', '.webp'):
+            ext = '.png'
+        name = f"{uuid.uuid4().hex}{ext}"
+        key = f"attach_uploads/{name}"
+        try:
+            f.seek(0)
+        except Exception:
+            pass
+        url = minio_client.upload_file(f.file, key, content_type=f.content_type)
+        urls.append(url)
+
+    return Response({'urls': urls}, status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])
