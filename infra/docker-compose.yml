@@ -48,12 +48,16 @@ services:
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
       - MINIO_ENDPOINT=minio:9000
-      - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT:-minio:9000}
+      # Browser must be able to open the presigned URL. `minio:9000` is only resolvable inside Docker.
+      # For local dev, default to host-accessible endpoint.
+      - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      - MINIO_BROWSER_ENDPOINT=${MINIO_BROWSER_ENDPOINT:-localhost:9000}
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-weavai_admin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minio123}
       - MINIO_BUCKET_NAME=${MINIO_BUCKET:-weav-ai}
       - MINIO_USE_SSL=false
       - MINIO_PUBLIC_USE_SSL=${MINIO_PUBLIC_USE_SSL:-false}
+      - MINIO_BROWSER_USE_SSL=${MINIO_BROWSER_USE_SSL:-false}
     depends_on:
       - postgres
       - redis
@@ -75,12 +79,15 @@ services:
       - FAL_KEY=${FAL_KEY}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
       - MINIO_ENDPOINT=minio:9000
-      - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT:-minio:9000}
+      # Same as API: generate presigned URLs with a host the browser can resolve.
+      - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      - MINIO_BROWSER_ENDPOINT=${MINIO_BROWSER_ENDPOINT:-localhost:9000}
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-weavai_admin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minio123}
       - MINIO_BUCKET_NAME=${MINIO_BUCKET:-weav-ai}
       - MINIO_USE_SSL=false
       - MINIO_PUBLIC_USE_SSL=${MINIO_PUBLIC_USE_SSL:-false}
+      - MINIO_BROWSER_USE_SSL=${MINIO_BROWSER_USE_SSL:-false}
     depends_on:
       - postgres
       - redis

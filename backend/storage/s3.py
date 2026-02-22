@@ -9,6 +9,7 @@ class MinIOStorage:
     def __init__(self):
         self.endpoint_url = f"http{'s' if settings.MINIO_USE_SSL else ''}://{settings.MINIO_ENDPOINT}"
         self.public_endpoint_url = f"http{'s' if settings.MINIO_PUBLIC_USE_SSL else ''}://{settings.MINIO_PUBLIC_ENDPOINT}"
+        self.browser_endpoint_url = f"http{'s' if settings.MINIO_BROWSER_USE_SSL else ''}://{settings.MINIO_BROWSER_ENDPOINT}"
         self.access_key = settings.MINIO_ACCESS_KEY
         self.secret_key = settings.MINIO_SECRET_KEY
         self.bucket_name = settings.MINIO_BUCKET_NAME
@@ -25,6 +26,18 @@ class MinIOStorage:
             self.public_client = boto3.client(
                 's3',
                 endpoint_url=self.public_endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                config=boto3.session.Config(signature_version='s3v4')
+            )
+
+        # Used to generate URLs the browser can actually open (e.g. localhost:9000),
+        # regardless of Docker-internal service names like `minio:9000`.
+        self.browser_client = self.public_client
+        if self.browser_endpoint_url != self.public_endpoint_url:
+            self.browser_client = boto3.client(
+                's3',
+                endpoint_url=self.browser_endpoint_url,
                 aws_access_key_id=self.access_key,
                 aws_secret_access_key=self.secret_key,
                 config=boto3.session.Config(signature_version='s3v4')
@@ -57,24 +70,9 @@ class MinIOStorage:
                 filename,
                 ExtraArgs={'ContentType': content_type or 'application/octet-stream'}
             )
-            # Generate URL (assuming public or presigned - for now simple concatenation for internal usage or public bucket)
-            # If the bucket is private, we should use presigned URLs, but for this RAG pipeline
-            # the worker just needs to access it. 
-            # Let's return the internal URL or a presigned URL.
-            # For simplicity and internal use, we'll return a presigned URL valid for 1 hour, 
-            # or just the path if the worker has access.
-            # Let's return a direct URL if public, or pre-signed.
-            # User request said "download from MinIO" in tasks.
-            # So the task needs to know the bucket and key.
-            # I will return the key as well or a dict. 
-            # BUT the prompt asked for "URL".
-            # Let's return a accessible URL.
-             
-            # url = f"{self.endpoint_url}/{self.bucket_name}/{filename}" # Simple public URL construction
-            # return url
-            
-            # Actually, better to return the presigned URL for safety
-            url = self.public_client.generate_presigned_url(
+
+            # Return a presigned URL that the browser can resolve (MINIO_BROWSER_ENDPOINT).
+            url = self.browser_client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket_name, 'Key': filename},
                 ExpiresIn=24 * 3600
@@ -101,7 +99,7 @@ class MinIOStorage:
         Returns a presigned URL for a given object key.
         """
         try:
-            return self.client.generate_presigned_url(
+            return self.browser_client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket_name, 'Key': filename},
                 ExpiresIn=expires_in

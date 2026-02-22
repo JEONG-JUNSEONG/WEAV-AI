@@ -120,9 +120,15 @@ FAL_KEY = config('FAL_KEY', default='')
 
 # MinIO Settings
 MINIO_ENDPOINT = config('MINIO_ENDPOINT', default='localhost:9000')
-MINIO_ACCESS_KEY = config('MINIO_ACCESS_KEY', default='minioadmin')
-MINIO_SECRET_KEY = config('MINIO_SECRET_KEY', default='minioadmin')
+# Default values aligned with infra/docker-compose.yml
+MINIO_ACCESS_KEY = config('MINIO_ACCESS_KEY', default='weavai_admin')
+MINIO_SECRET_KEY = config('MINIO_SECRET_KEY', default='minio123')
 MINIO_BUCKET_NAME = config('MINIO_BUCKET_NAME', default='weav-ai')
 MINIO_USE_SSL = _bool(config('MINIO_USE_SSL', default=False))
 MINIO_PUBLIC_ENDPOINT = config('MINIO_PUBLIC_ENDPOINT', default=MINIO_ENDPOINT)
 MINIO_PUBLIC_USE_SSL = _bool(config('MINIO_PUBLIC_USE_SSL', default=MINIO_USE_SSL))
+# Browser-facing endpoint used for presigned URLs returned to the frontend.
+# In Docker, MINIO_ENDPOINT is typically `minio:9000` (internal) which the browser cannot resolve.
+# Keep this configurable separately from MINIO_PUBLIC_ENDPOINT (fal / external workers).
+MINIO_BROWSER_ENDPOINT = config('MINIO_BROWSER_ENDPOINT', default=MINIO_PUBLIC_ENDPOINT)
+MINIO_BROWSER_USE_SSL = _bool(config('MINIO_BROWSER_USE_SSL', default=MINIO_PUBLIC_USE_SSL))
