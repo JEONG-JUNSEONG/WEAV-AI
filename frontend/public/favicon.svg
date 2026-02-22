@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="62%" r="70%">
+      <stop offset="0%" stop-color="#1b1f2e"/>
+      <stop offset="55%" stop-color="#0b0f16"/>
+      <stop offset="100%" stop-color="#05070c"/>
+    </radialGradient>
+
+    <radialGradient id="blueGlow" cx="24%" cy="70%" r="55%">
+      <stop offset="0%" stop-color="#35b9ff" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#35b9ff" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#35b9ff" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="purpleGlow" cx="78%" cy="70%" r="60%">
+      <stop offset="0%" stop-color="#b24bff" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#b24bff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#b24bff" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="wGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2fd3ff"/>
+      <stop offset="40%" stop-color="#4b6cff"/>
+      <stop offset="100%" stop-color="#a43cff"/>
+    </linearGradient>
+
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix
+        in="blur"
+        type="matrix"
+        values="
+          1 0 0 0 0
+          0 0.85 0 0 0
+          1 0 1 0 0
+          0 0 0 0.55 0"
+        result="tint"/>
+      <feMerge>
+        <feMergeNode in="tint"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="whiteGlow" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feColorMatrix
+        in="blur"
+        type="matrix"
+        values="
+          1 0 0 0 0
+          0 1 0 0 0
+          1 0 1 0 0
+          0 0 0 0.45 0"
+        result="tint"/>
+      <feMerge>
+        <feMergeNode in="tint"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bgGlow)"/>
+  <rect width="512" height="512" fill="url(#blueGlow)"/>
+  <rect width="512" height="512" fill="url(#purpleGlow)"/>
+
+  <!-- W (left) -->
+  <g filter="url(#softGlow)">
+    <path
+      d="M90 150 L170 394 L256 240 L342 394 L422 150"
+      fill="none"
+      stroke="url(#wGrad)"
+      stroke-width="78"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M90 150 L170 394 L256 240 L342 394 L422 150"
+      fill="none"
+      stroke="rgba(255,255,255,0.55)"
+      stroke-width="10"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+
+  <!-- A (right, overlapped) -->
+  <g filter="url(#whiteGlow)">
+    <path
+      d="M280 394 L356 150 L442 394"
+      fill="none"
+      stroke="#f4f6ff"
+      stroke-width="78"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M315 296 L410 296"
+      fill="none"
+      stroke="#f4f6ff"
+      stroke-width="70"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M280 394 L356 150 L442 394"
+      fill="none"
+      stroke="rgba(168,85,247,0.9)"
+      stroke-width="12"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>
+
