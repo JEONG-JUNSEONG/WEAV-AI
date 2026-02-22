@@ -35,15 +35,27 @@ def session_list(request):
             qs = qs.filter(kind=kind)
         serializer = SessionListSerializer(qs, many=True)
         return Response(serializer.data)
-        
-    kind = request.data.get('kind', SESSION_KIND_CHAT)
-    title = request.data.get('title', '')[:255]
-    if kind not in (SESSION_KIND_CHAT, SESSION_KIND_IMAGE, SESSION_KIND_STUDIO):
-        kind = SESSION_KIND_CHAT
-    
-    user = request.user if request.user.is_authenticated else None
-    session = Session.objects.create(kind=kind, title=title or f'{kind} session', user=user)
-    return Response(SessionListSerializer(session).data, status=status.HTTP_201_CREATED)
+
+    # POST: create session (전체 예외 잡아 JSON으로 반환)
+    try:
+        kind = request.data.get('kind', SESSION_KIND_CHAT)
+        title = (request.data.get('title') or '')[:255]
+        if kind not in (SESSION_KIND_CHAT, SESSION_KIND_IMAGE, SESSION_KIND_STUDIO):
+            kind = SESSION_KIND_CHAT
+        user = request.user if request.user.is_authenticated else None
+        session = Session.objects.create(
+            kind=kind,
+            title=title or f'{kind} session',
+            user=user,
+        )
+        data = SessionDetailSerializer(session).data
+        return Response(data, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.exception("Session create/serialize failed: %s", e)
+        return Response(
+            {'detail': f'세션 생성 실패: {str(e)}. 프로젝트 루트에서 make migrate 실행 후 재시도.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(['GET', 'PATCH', 'DELETE'])
@@ -59,10 +71,20 @@ def session_detail(request, session_id):
     if request.method == 'GET':
         return Response(SessionDetailSerializer(session).data)
     if request.method == 'PATCH':
+        updated = []
         title = request.data.get('title')
         if title is not None:
             session.title = str(title)[:255]
-            session.save(update_fields=['title', 'updated_at'])
+            updated.extend(['title', 'updated_at'])
+        ref_urls = request.data.get('reference_image_urls')
+        if ref_urls is not None and session.kind == SESSION_KIND_IMAGE:
+            if not isinstance(ref_urls, list):
+                return Response({'detail': 'reference_image_urls must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+            urls = [u for u in ref_urls if isinstance(u, str) and u.strip()][:2]
+            session.reference_image_urls = urls
+            updated.extend(['reference_image_urls', 'updated_at'])
+        if updated:
+            session.save(update_fields=list(dict.fromkeys(updated)))
         return Response(SessionListSerializer(session).data)
     if request.method == 'DELETE':
         session.delete()

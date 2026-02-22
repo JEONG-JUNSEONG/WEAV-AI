@@ -5,8 +5,9 @@ fal.ai HTTP API: openrouter/router (chat), imagen4 (Google), flux-pro v1.1-ultra
 import base64
 import os
 import logging
+import mimetypes
 from typing import Optional
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, unquote
 import ipaddress
 
 import requests
@@ -30,6 +31,11 @@ FAL_NANO_BANANA_PRO = 'fal-ai/nano-banana-pro'
 FAL_NANO_BANANA_PRO_EDIT = 'fal-ai/nano-banana-pro/edit'
 
 logger = logging.getLogger(__name__)
+
+try:
+    from storage.s3 import minio_client
+except Exception:
+    minio_client = None
 
 
 def _fal_headers():
@@ -80,6 +86,53 @@ def _fetch_image_as_data_uri(url: str, timeout: int = 30) -> str:
     return f'data:{content_type};base64,{b64}'
 
 
+def _bytes_to_image_data_uri(raw: bytes, filename_hint: str = "") -> str:
+    guessed = mimetypes.guess_type(filename_hint)[0] if filename_hint else None
+    content_type = guessed or "image/png"
+    if content_type not in ("image/png", "image/jpeg", "image/jpg", "image/webp"):
+        content_type = "image/png"
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:{content_type};base64,{b64}"
+
+
+def _extract_storage_key_from_url(url: str) -> Optional[str]:
+    try:
+        parsed = urlparse(url)
+        raw_path = (parsed.path or "").strip("/")
+        if not raw_path:
+            return None
+        path = unquote(raw_path)
+
+        # /<bucket>/<key> 형식
+        if minio_client is not None:
+            bucket = getattr(minio_client, "bucket_name", "")
+            prefix = f"{bucket}/"
+            if bucket and path.startswith(prefix):
+                return path[len(prefix):]
+
+        # /weavai-files/<key> 또는 .../weavai-files/<key>
+        marker = "/weavai-files/"
+        if marker in f"/{path}":
+            return path.split("weavai-files/", 1)[1]
+
+        # 이미 key만 들어온 경우
+        if path.startswith("ref_uploads/") or path.startswith("attach_uploads/") or path.startswith("images/"):
+            return path
+        return None
+    except Exception:
+        return None
+
+
+def _fetch_image_from_minio_as_data_uri(url: str) -> Optional[str]:
+    if minio_client is None:
+        return None
+    key = _extract_storage_key_from_url(url)
+    if not key:
+        return None
+    raw = minio_client.get_file_content(key)
+    return _bytes_to_image_data_uri(raw, filename_hint=key)
+
+
 def _ensure_fal_reachable_image_url(url: str) -> str:
     """
     fal.ai가 접근할 수 없는 URL(ngrok, localhost 등)이면
@@ -91,9 +144,16 @@ def _ensure_fal_reachable_image_url(url: str) -> str:
         return url
     if _is_private_or_local_url(url) or _is_ngrok_url(url):
         try:
+            from_minio = _fetch_image_from_minio_as_data_uri(url)
+            if from_minio:
+                return from_minio
             return _fetch_image_as_data_uri(url)
         except Exception as e:
-            logger.warning("Failed to fetch image for fal, passing URL as-is: %s", e)
+            logger.warning("Failed to convert private image URL to data URI for fal: %s", e)
+            raise FALError(
+                "첨부/참조 이미지 URL을 fal이 읽을 수 없습니다. "
+                "공개 접근 가능한 URL을 사용하거나 서버에서 Data URI 변환이 가능한지 확인하세요."
+            )
     return url
 
 
@@ -129,13 +189,23 @@ def _sanitize_payload(payload: dict) -> dict:
 
 
 def chat_completion(prompt: str, model: str = 'google/gemini-2.5-flash', system_prompt: Optional[str] = None, temperature: float = 0.7, max_tokens: Optional[int] = None) -> str:
-    payload = {'prompt': prompt, 'model': model, 'temperature': temperature}
+    payload = {'prompt': (prompt or '').strip(), 'model': (model or 'google/gemini-2.5-flash').strip(), 'temperature': max(0, min(2, temperature))}
     if system_prompt:
         payload['system_prompt'] = system_prompt
     if max_tokens is not None:
-        payload['max_tokens'] = max_tokens
-    r = requests.post(f'{FAL_BASE}/{FAL_CHAT_ENDPOINT}', headers=_fal_headers(), json=payload, timeout=120)
-    r.raise_for_status()
+        payload['max_tokens'] = max(1, max_tokens)
+    if not payload['prompt']:
+        raise FALError('prompt is required')
+    url = f'{FAL_BASE}/{FAL_CHAT_ENDPOINT}'
+    r = requests.post(url, headers=_fal_headers(), json=payload, timeout=120)
+    if not r.ok:
+        try:
+            err_body = r.json()
+            msg = err_body.get('detail') or err_body.get('error') or err_body.get('message') or str(err_body)
+        except Exception:
+            msg = r.text or r.reason or f'HTTP {r.status_code}'
+        logger.warning("fal openrouter %s: status=%s body=%s", url, r.status_code, msg)
+        raise FALError(f'OpenRouter 요청 실패 ({r.status_code}): {msg}')
     data = r.json()
     if 'output' not in data:
         raise FALError(data.get('error', 'No output'))
@@ -176,19 +246,20 @@ def image_generation_fal(prompt: str, model: str = FAL_IMAGEN4, aspect_ratio: st
             payload['seed'] = kwargs['seed']
     elif 'gemini-3-pro-image-preview' in model.lower():
         ref_url = kwargs.get('reference_image_url')
+        edit_urls = kwargs.get('image_urls') or ([ref_url] if ref_url else [])
+        edit_urls = [_ensure_fal_reachable_image_url(u) for u in edit_urls if u][:2]
         allowed_ratio = ('21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16')
         res = kwargs.get('resolution') or '1K'
         res = res if res in ('1K', '2K', '4K') else '1K'
         out_fmt = kwargs.get('output_format') or 'png'
         out_fmt = out_fmt if out_fmt in ('png', 'jpeg', 'webp') else 'png'
-        if ref_url:
-            ref_url = _ensure_fal_reachable_image_url(ref_url)
-            # 참조 이미지 있음 → edit API (이미지 기반 편집)
+        if edit_urls:
+            # 참조 이미지 1~2개 → edit API (이미지 기반 편집)
             endpoint = FAL_GEMINI3_PRO_IMAGE_EDIT
             payload = {
                 'prompt': prompt,
                 'num_images': num_images,
-                'image_urls': [ref_url],
+                'image_urls': edit_urls,
                 'aspect_ratio': aspect_ratio if aspect_ratio in allowed_ratio else 'auto',
                 'output_format': out_fmt,
                 'resolution': res,

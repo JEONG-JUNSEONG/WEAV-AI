@@ -180,7 +180,8 @@ npm run dev
 cd infra
 docker compose up -d
 docker compose down
-docker compose run --rm api python manage.py test tests
+docker compose run --rm --entrypoint python api manage.py test tests
+docker compose run --rm --entrypoint python api manage.py migrate
 ```
 
 ---
@@ -194,6 +195,7 @@ docker compose run --rm api python manage.py test tests
 | `FAL_KEY` | fal.ai API 키 | ✅ |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 (트렌드 시그널 등) | 선택 |
 | `MINIO_PUBLIC_ENDPOINT` | fal이 이미지에 접근할 공개 MinIO 주소 (ngrok 등) | 선택 |
+| `MINIO_BROWSER_ENDPOINT` | 프론트에서 업로드/첨부 이미지를 바로 표시할 MinIO 주소 (로컬 권장: `localhost:9000`) | 선택 |
 
 - 저장소에는 `.env`가 없습니다. 팀원은 `infra/.env.example`을 복사해 `infra/.env`로 만들고, **FAL_KEY**만이라도 넣으면 Docker 빌드·기동·테스트 가능합니다.
 
@@ -215,6 +217,22 @@ docker compose run --rm api python manage.py test tests
   - **Windows:** `.\compose.ps1 test` 또는 `compose.cmd test`
 - 실패 시: `make up` / `.\compose.ps1 up` 으로 postgres·redis·api 기동 여부 확인 후, `make logs` / `.\compose.ps1 logs` 로 api 로그 확인.
 
+### 테스트 DB 생성 오류(POSTGRES collation mismatch)
+
+다음과 같은 에러로 테스트 DB 생성이 실패할 수 있습니다:
+
+- `template database "template1" has a collation version mismatch`
+
+Docker Postgres 데이터 볼륨이 다른 glibc 버전에서 만들어진 경우 발생합니다. 아래를 1회 실행하면 해결됩니다.
+
+```bash
+cd infra
+docker compose exec -T postgres psql -U weavai -d postgres -c "ALTER DATABASE template1 REFRESH COLLATION VERSION;"
+docker compose exec -T postgres psql -U weavai -d template1 -c "REINDEX DATABASE template1;"
+docker compose exec -T postgres psql -U weavai -d postgres -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;"
+docker compose exec -T postgres psql -U weavai -d postgres -c "ALTER DATABASE weavai REFRESH COLLATION VERSION;"
+```
+
 ---
 
 ## 서비스 사용 방법
@@ -226,7 +244,7 @@ docker compose run --rm api python manage.py test tests
 2. **채팅**  
    - 모델 선택(Gemini 2.5 Flash/Pro, GPT-4o 등) 후 메시지 입력·전송  
    - 응답은 비동기 처리, 완료 시 자동 갱신  
-   - 참조 이미지·첨부 이미지 지원 (Nano Banana 등)
+   - 같은 채팅방에서 **텍스트↔이미지 모드 토글**로 이미지 생성까지 공존
 
 3. **이미지 생성**  
    - 모델 선택(Imagen 4, FLUX Pro v1.1 Ultra, Nano Banana 등) 후 프롬프트 입력·생성  

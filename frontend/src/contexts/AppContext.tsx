@@ -9,7 +9,7 @@ type AppContextValue = {
   loadSessions: () => Promise<void>;
   selectSession: (session: Session | null) => Promise<void>;
   createSession: (kind: 'chat' | 'image' | 'studio', title?: string) => Promise<Session>;
-  patchSession: (id: number, data: { title?: string }) => Promise<void>;
+  patchSession: (id: number, data: { title?: string; reference_image_urls?: string[] }) => Promise<void>;
   deleteSession: (id: number) => Promise<void>;
   refreshCurrent: () => Promise<void>;
   /** 해당 세션만 갱신. 현재 선택된 세션이면 currentSession도 갱신하고 true 반환, 아니면 목록만 갱신하고 false 반환 */
@@ -112,7 +112,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     writeLastSessionId(full.id);
   }, []);
 
-  const patchSession = useCallback(async (id: number, data: { title?: string }) => {
+  const patchSession = useCallback(async (id: number, data: { title?: string; reference_image_urls?: string[] }) => {
     const updated = await sessionApi.patch(id, data);
     setSessions((prev) => prev.map((s) => (s.id === id ? updated : s)));
     setCurrentSession((curr) => (curr?.id === id ? updated : curr));

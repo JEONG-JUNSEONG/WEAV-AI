@@ -41,7 +41,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/78 p-4 backdrop-blur-sm animate-fade-in"
       onClick={handleBackdrop}
       onKeyDown={handleKeyDown}
       role="dialog"
@@ -50,7 +50,7 @@ export function ConfirmDialog({
       aria-describedby="confirm-dialog-desc"
     >
       <div
-        className="bg-card border border-border rounded-lg shadow-xl max-w-sm w-full p-5 animate-scale-in"
+        className="bg-card/90 border border-border/65 rounded-xl max-w-sm w-full p-5 backdrop-blur-xl animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="confirm-dialog-title" className="text-lg font-semibold text-foreground mb-2">
@@ -64,7 +64,7 @@ export function ConfirmDialog({
             ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded bg-muted text-muted-foreground hover:bg-muted/80 font-medium transition-colors duration-200"
+            className="px-4 py-2 rounded-xl border border-border/70 bg-secondary/55 text-muted-foreground hover:bg-secondary/75 font-medium transition-colors duration-200"
           >
             {cancelLabel}
           </button>
@@ -73,8 +73,8 @@ export function ConfirmDialog({
             onClick={onConfirm}
             className={`px-4 py-2 rounded font-medium transition-colors duration-200 ${
               variant === 'destructive'
-                ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                ? 'rounded-xl border border-destructive/50 bg-destructive/20 text-destructive-foreground hover:bg-destructive/28'
+                : 'rounded-xl border border-primary/45 bg-primary/20 text-foreground hover:bg-primary/26'
             }`}
           >
             {confirmLabel}

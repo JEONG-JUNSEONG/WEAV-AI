@@ -7,7 +7,7 @@ export const sessionApi = {
   create: (kind: 'chat' | 'image' | 'studio', title?: string) =>
     api.post<Session>('/api/v1/sessions/', { kind, title }),
   get: (id: number) => api.get<Session>(`/api/v1/sessions/${id}/`),
-  patch: (id: number, data: { title?: string }) =>
+  patch: (id: number, data: { title?: string; reference_image_urls?: string[] }) =>
     api.patch<Session>(`/api/v1/sessions/${id}/`, data),
   delete: (id: number) => api.delete(`/api/v1/sessions/${id}/`),
 };

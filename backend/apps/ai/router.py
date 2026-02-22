@@ -12,12 +12,13 @@ from .fal_client import (
 )
 from .errors import AIError
 
+# OpenRouter 모델 ID (fal.ai openrouter/router). 존재하지 않는 ID는 400 유발
 CHAT_MODELS = [
     'google/gemini-2.5-flash',
     'google/gemini-2.5-pro',
     'openai/gpt-4o',
     'openai/gpt-4o-mini',
-    'openai/gpt-5-chat',
+    'openai/gpt-4.1',  # gpt-5-chat 대신 OpenRouter에서 지원하는 ID 사용
 ]
 
 IMAGE_MODEL_GOOGLE = FAL_IMAGEN4

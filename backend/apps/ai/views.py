@@ -33,7 +33,7 @@ def complete_chat(request):
         return Response({'detail': 'session_id required'}, status=status.HTTP_400_BAD_REQUEST)
     try:
         session = get_object_or_404(Session, pk=session_id)
-        if session.kind != SESSION_KIND_CHAT:
+        if session.kind not in (SESSION_KIND_CHAT, SESSION_KIND_IMAGE):
             return Response({'detail': 'Not a chat session'}, status=status.HTTP_400_BAD_REQUEST)
         user_msg = Message.objects.create(session=session, role='user', content=body.prompt)
         if Message.objects.filter(session_id=session.pk).count() == 1:
@@ -71,7 +71,7 @@ def complete_image(request):
     if not session_id:
         return Response({'detail': 'session_id required'}, status=status.HTTP_400_BAD_REQUEST)
     session = get_object_or_404(Session, pk=session_id)
-    if session.kind != SESSION_KIND_IMAGE:
+    if session.kind not in (SESSION_KIND_IMAGE, SESSION_KIND_CHAT):
         return Response({'detail': 'Not an image session'}, status=status.HTTP_400_BAD_REQUEST)
     if Job.objects.filter(session_id=session.pk, kind='image').count() == 0:
         new_title = (body.prompt.strip() or session.title)[:255]
@@ -79,7 +79,15 @@ def complete_image(request):
         session.save(update_fields=['title', 'updated_at'])
     image_urls = body.image_urls or []
     image_urls = [u for u in image_urls if isinstance(u, str) and u.strip()]
-    has_reference = bool(body.reference_image_id or body.reference_image_url)
+    # 세션 참고 이미지: 요청 body에 실려 오면 우선 사용, 없으면 세션 DB에서 로드 (body로 보내야 edit 경로 확실히 사용)
+    body_ref_urls = getattr(body, 'reference_image_urls', None) or []
+    body_ref_urls = [u for u in body_ref_urls if isinstance(u, str) and u.strip()][:2]
+    session_ref_urls = body_ref_urls or (getattr(session, 'reference_image_urls', None) or [])
+    if not isinstance(session_ref_urls, list):
+        session_ref_urls = []
+    session_ref_urls = [u for u in session_ref_urls if isinstance(u, str) and u.strip()][:2]
+    has_request_ref = bool(body.reference_image_id or body.reference_image_url)
+    has_reference = has_request_ref or bool(session_ref_urls)
     model = body.model or IMAGE_MODEL_GOOGLE
 
     if image_urls:
@@ -108,14 +116,16 @@ def complete_image(request):
                 )
 
     job = Job.objects.create(session=session, kind='image', status='pending')
+    # 요청에서 참조를 보냈으면 기존처럼 단일 참조+첨부, 없으면 세션 참고 이미지 목록 전달
     task = tasks.task_image.delay(
         job.id,
         prompt=body.prompt,
         model=model,
         aspect_ratio=body.aspect_ratio,
         num_images=body.num_images,
-        reference_image_id=body.reference_image_id,
-        reference_image_url=body.reference_image_url,
+        reference_image_id=body.reference_image_id if has_request_ref else None,
+        reference_image_url=body.reference_image_url if has_request_ref else None,
+        reference_image_urls=session_ref_urls if not has_request_ref and session_ref_urls else None,
         image_urls=image_urls,
         resolution=body.resolution,
         output_format=body.output_format,
@@ -239,13 +249,17 @@ def regenerate_image(request):
     if not session_id:
         return Response({'detail': 'session_id required'}, status=status.HTTP_400_BAD_REQUEST)
     session = get_object_or_404(Session, pk=session_id)
-    if session.kind != SESSION_KIND_IMAGE:
+    if session.kind not in (SESSION_KIND_IMAGE, SESSION_KIND_CHAT):
         return Response({'detail': 'Not an image session'}, status=status.HTTP_400_BAD_REQUEST)
     last_record = session.image_records.order_by('-created_at').first()
     if not last_record:
         return Response({'detail': 'No image to regenerate'}, status=status.HTTP_400_BAD_REQUEST)
-    prompt = last_record.prompt
-    model = last_record.model
+    prompt = request.data.get('prompt')
+    if prompt is None or (isinstance(prompt, str) and not prompt.strip()):
+        prompt = last_record.prompt
+    else:
+        prompt = str(prompt).strip()[:10000]
+    model = request.data.get('model') or last_record.model
     last_record.delete()
     job = Job.objects.create(session=session, kind='image', status='pending')
     task = tasks.task_image.delay(

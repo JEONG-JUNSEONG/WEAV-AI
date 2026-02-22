@@ -79,7 +79,7 @@ const renderWithDocLinks = (
         key={`doc-mention-${match.docId}-${index}`}
         type="button"
         onClick={() => onSelectDocument?.(match.docId)}
-        className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+        className="text-accent underline underline-offset-2 hover:text-accent/80"
       >
         {match.text}
       </button>
@@ -116,8 +116,10 @@ export function ChatMessage({
     >
       <div className={`flex items-start gap-2 max-w-[85%] ${isUser ? 'flex-row' : ''}`}>
         <div
-          className={`rounded-lg px-4 py-2 transition-colors duration-200 ${
-            isUser ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground'
+          className={`rounded-xl px-4 py-2 border transition-colors duration-200 ${
+            isUser
+              ? 'bg-primary/18 text-foreground border-primary/40'
+              : 'bg-card/52 text-foreground border-border/50 backdrop-blur-md'
           }`}
         >
           {isUser ? (
@@ -136,14 +138,14 @@ export function ChatMessage({
                       <button
                         type="button"
                         onClick={() => onSelectDocument?.(docId)}
-                        className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+                        className="text-accent underline underline-offset-2 hover:text-accent/80"
                       >
                         {children}
                       </button>
                     );
                   }
                   return (
-                    <a href={href} {...props} className="text-blue-400 underline underline-offset-2 hover:text-blue-300">
+                    <a href={href} {...props} className="text-accent underline underline-offset-2 hover:text-accent/80">
                       {children}
                     </a>
                   );
@@ -187,7 +189,7 @@ export function ChatMessage({
           <button
             type="button"
             onClick={() => onEditRequested(message.content)}
-            className="p-1.5 rounded shrink-0 mt-1 bg-muted/80 text-muted-foreground hover:bg-muted hover:text-foreground border border-border transition-colors duration-200"
+            className="p-1.5 rounded shrink-0 mt-1 bg-secondary/60 text-muted-foreground hover:bg-secondary/80 hover:text-foreground border border-border/65 transition-colors duration-200"
             title="하단 입력창에서 수정 후 재질문"
             aria-label="하단 입력창에서 수정 후 재질문"
           >
@@ -197,7 +199,7 @@ export function ChatMessage({
         <button
           type="button"
           onClick={handleCopy}
-          className="p-1.5 rounded shrink-0 mt-1 bg-muted/80 text-muted-foreground hover:bg-muted hover:text-foreground border border-border transition-colors duration-200 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200"
+          className="p-1.5 rounded shrink-0 mt-1 bg-secondary/60 text-muted-foreground hover:bg-secondary/80 hover:text-foreground border border-border/65 transition-colors duration-200 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200"
           title="복사"
           aria-label="복사"
         >

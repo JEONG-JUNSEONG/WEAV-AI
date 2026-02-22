@@ -183,6 +183,8 @@ function PdfPage({ url, pageNumber, onPageCount, highlight }: PdfPageProps) {
 type DocumentPanelProps = {
   open: boolean;
   onToggle: () => void;
+  showTrigger?: boolean;
+  triggerTopClassName?: string;
   panelWidth: number;
   minWidth: number;
   maxWidth: number;
@@ -202,6 +204,8 @@ type DocumentPanelProps = {
 export function DocumentPanel({
   open,
   onToggle,
+  showTrigger = true,
+  triggerTopClassName = 'top-28',
   panelWidth,
   minWidth,
   maxWidth,
@@ -293,17 +297,17 @@ export function DocumentPanel({
 
   return (
     <>
-      {!open && (
+      {!open && showTrigger && (
         <button
           type="button"
           onClick={onToggle}
-          className="fixed right-0 top-28 z-20 rounded-l-xl border border-border bg-background px-3 py-2 text-xs font-medium text-muted-foreground shadow-md hover:text-foreground"
+          className={`fixed right-0 ${triggerTopClassName} z-20 rounded-l-xl border border-border/65 bg-card/86 backdrop-blur-xl px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground`}
         >
           문서
         </button>
       )}
       <aside
-        className={`fixed top-14 right-0 z-20 h-[calc(100vh-3.5rem)] w-full border-l border-border bg-background shadow-lg transition-transform duration-200 ease-out ${
+        className={`fixed top-14 right-0 z-20 h-[calc(100vh-3.5rem)] w-full border-l border-border/65 bg-card/86 backdrop-blur-xl transition-transform duration-200 ease-out ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
         style={{ width: panelWidth }}
@@ -315,7 +319,7 @@ export function DocumentPanel({
               setResizing(true);
               resizeStart.current = { x: e.clientX, width: panelWidth };
             }}
-            className="absolute left-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-primary/40"
+            className="absolute left-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-primary/25"
             title="드래그하여 크기 조절"
           />
         )}
@@ -336,7 +340,7 @@ export function DocumentPanel({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-secondary/55 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
               >
                 <Upload size={14} />
                 업로드
@@ -389,7 +393,7 @@ export function DocumentPanel({
                           }
                         }}
                         className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors cursor-pointer ${
-                          isActive ? 'border-primary bg-primary/5 text-foreground' : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+                          isActive ? 'border-primary/45 bg-primary/12 text-foreground' : 'border-border/70 bg-background/70 text-muted-foreground hover:bg-muted/35'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -451,8 +455,8 @@ export function DocumentPanel({
                       onClick={() => onSelectCitation(idx)}
                       className={`w-full rounded-lg border px-3 py-2 text-left text-[11px] transition-colors ${
                         idx === activeCitationIndex
-                          ? 'border-primary bg-primary/10 text-foreground'
-                          : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+                          ? 'border-primary/45 bg-primary/12 text-foreground'
+                          : 'border-border/70 bg-background/70 text-muted-foreground hover:bg-muted/35'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">

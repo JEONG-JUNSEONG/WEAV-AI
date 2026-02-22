@@ -17,7 +17,6 @@ export const IMAGE_MODEL_ID_NANO_BANANA = 'fal-ai/nano-banana-pro';
 export const IMAGE_MODELS: ImageModel[] = [
   { id: IMAGE_MODEL_ID_IMAGEN4, name: 'Imagen 4 (Google)', provider: 'Google' },
   { id: IMAGE_MODEL_ID_FLUX, name: 'FLUX Pro v1.1 Ultra', provider: 'fal.ai' },
-  { id: IMAGE_MODEL_ID_GEMINI, name: 'Gemini 3 Pro Image Preview', provider: 'Google' },
   { id: IMAGE_MODEL_ID_NANO_BANANA, name: 'Nano Banana Pro', provider: 'Google' },
   { id: IMAGE_MODEL_ID_KLING, name: 'Kling', provider: 'Kling' },
 ];
@@ -85,7 +84,6 @@ export function getDefaultImageOptions(modelId: string): ImageGenOptions {
 
 /** 참조 이미지(업로드·선택)를 지원하는 이미지 모델 ID */
 export const IMAGE_MODELS_SUPPORT_REFERENCE = [
-  IMAGE_MODEL_ID_GEMINI,
   IMAGE_MODEL_ID_KLING,
   IMAGE_MODEL_ID_NANO_BANANA,
 ] as const;

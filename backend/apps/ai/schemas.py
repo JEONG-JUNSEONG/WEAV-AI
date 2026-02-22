@@ -26,6 +26,7 @@ class ImageGenerationRequest(BaseModel):
     num_images: int = Field(default=1, ge=1, le=4)
     reference_image_id: Optional[int] = None
     reference_image_url: Optional[str] = Field(None, max_length=2048)
+    reference_image_urls: Optional[list[str]] = None  # 세션 참고 이미지 1~2개를 요청에 실어 보내면 edit 경로 보장
     image_urls: Optional[list[str]] = None
     resolution: Optional[str] = Field(None, pattern=r'^(1K|2K|4K)$')
     output_format: Optional[str] = Field(None, pattern=r'^(png|jpeg|webp)$')

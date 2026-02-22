@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, Settings2, Upload, X, ArrowUp, ImagePlus, Info, Paperclip } from 'lucide-react';
+import { ChevronDown, Settings2, Upload, X, ArrowUp, ImagePlus, Info, Plus, Mic } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
 import { useChat } from '@/contexts/ChatContext';
 import { useLayout } from '@/contexts/LayoutContext';
@@ -21,6 +21,7 @@ import {
 import { chatApi } from '@/services/api/chatApi';
 import { useToast } from '@/contexts/ToastContext';
 import { ModelSelector } from './ModelSelector';
+import { getImageModelGuide } from './imageModelGuide';
 
 export function ChatInput({
   rightOffset = 0,
@@ -39,6 +40,8 @@ export function ChatInput({
     stopGeneration,
     getChatModel,
     setChatModel,
+    getChatInputMode,
+    setChatInputMode,
     getImageModel,
     setImageModel,
     getImageSettings,
@@ -65,10 +68,12 @@ export function ChatInput({
   const [imageSettingsOpen, setImageSettingsOpen] = useState(false);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [modelInfoOpen, setModelInfoOpen] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const modelInfoRef = useRef<HTMLDivElement>(null);
   const [maxTextareaHeight, setMaxTextareaHeight] = useState<number | null>(null);
 
   if (!currentSession) return null;
@@ -76,18 +81,20 @@ export function ChatInput({
   const chatModel = getChatModel(currentSession.id);
   const imageModel = getImageModel(currentSession.id);
   const isChat = currentSession.kind === 'chat';
+  const isImageMode = isChat ? getChatInputMode(currentSession.id) === 'image' : true;
+  const showImageFeatures = isImageMode;
   const isRegenerateMode =
-    isChat && regeneratePrompt != null && regeneratePrompt.sessionId === currentSession.id;
+    isChat && !isImageMode && regeneratePrompt != null && regeneratePrompt.sessionId === currentSession.id;
   const isRegenerateImageMode =
-    !isChat && regenerateImagePrompt != null && regenerateImagePrompt.sessionId === currentSession.id;
-  const modelSettings = !isChat ? IMAGE_MODEL_SETTINGS[imageModel] : null;
-  const imageSettings = !isChat ? getImageSettings(currentSession.id, imageModel) : null;
+    showImageFeatures && regenerateImagePrompt != null && regenerateImagePrompt.sessionId === currentSession.id;
+  const modelSettings = showImageFeatures ? IMAGE_MODEL_SETTINGS[imageModel] : null;
+  const imageSettings = showImageFeatures ? getImageSettings(currentSession.id, imageModel) : null;
   const sessionId = currentSession.id;
-  const attachmentItems = !isChat ? getAttachmentItems(sessionId) : [];
+  const attachmentItems = showImageFeatures ? getAttachmentItems(sessionId) : [];
   const attachmentCount = attachmentItems.length;
-  const referenceImageId = !isChat ? getReferenceImageId(sessionId) : null;
-  const referenceImageUrl = !isChat ? getReferenceImageUrl(sessionId) : null;
-  const hasReference = !isChat && (referenceImageId != null || referenceImageUrl != null);
+  const referenceImageId = showImageFeatures ? getReferenceImageId(sessionId) : null;
+  const referenceImageUrl = showImageFeatures ? getReferenceImageUrl(sessionId) : null;
+  const hasReference = showImageFeatures && (referenceImageId != null || referenceImageUrl != null);
   const documents = isChat ? getDocuments(sessionId) : [];
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -95,7 +102,7 @@ export function ChatInput({
   const [mentionStart, setMentionStart] = useState(0);
 
   const getAttachmentPolicy = () => {
-    if (isChat) return { maxCount: 0, blockMessage: '' };
+    if (!showImageFeatures) return { maxCount: 0, blockMessage: '' };
     const isRegenLimited = isRegenerateImageMode;
     if (imageModel === IMAGE_MODEL_ID_NANO_BANANA) {
       const baseMax = hasReference ? 1 : 2;
@@ -121,40 +128,7 @@ export function ChatInput({
 
   const attachmentPolicy = getAttachmentPolicy();
   const maxAttachments = attachmentPolicy.maxCount;
-  const getModelInfoLines = () => {
-    if (isChat) return [];
-    if (imageModel === IMAGE_MODEL_ID_NANO_BANANA) {
-      return [
-        '참조 이미지 지원',
-        '참조 미사용: 이미지 첨부 최대 2개',
-        '참조 사용: 이미지 첨부 최대 1개',
-        '텍스트만 입력 시 Gemini 3 Pro TTI 사용',
-        '이미지 첨부/참조 사용 시 Nano Banana Pro Edit 사용',
-      ];
-    }
-    if (imageModel === IMAGE_MODEL_ID_KLING) {
-      return [
-        '참조 이미지 지원',
-        '참조 미사용: 이미지 1개 첨부 + 텍스트',
-        '참조 사용: 텍스트만 가능 (첨부 불가)',
-        '이미지 2개 이상 첨부는 미지원 — Nano Banana 권장',
-      ];
-    }
-    if (imageModel === IMAGE_MODEL_ID_GEMINI) {
-      return [
-        '텍스트 전용 또는 참조 1개 기반 생성',
-        '이미지 첨부 미지원',
-      ];
-    }
-    if (imageModel === IMAGE_MODEL_ID_IMAGEN4 || imageModel === IMAGE_MODEL_ID_FLUX) {
-      return [
-        '텍스트 전용 TTI',
-        '이미지 첨부 미지원 — Nano Banana/Kling 권장',
-      ];
-    }
-    return [];
-  };
-  const modelInfoLines = getModelInfoLines();
+  const modelGuide = showImageFeatures ? getImageModelGuide(imageModel, { hasReference }) : null;
 
   useEffect(() => {
     if (regeneratePrompt?.sessionId === currentSession?.id) {
@@ -191,11 +165,27 @@ export function ChatInput({
   }, [onHeightChange]);
 
   useEffect(() => {
-    if (!isChat) {
+    if (showImageFeatures) {
       setMentionOpen(false);
       setMentionQuery('');
     }
-  }, [isChat]);
+  }, [showImageFeatures]);
+
+  useEffect(() => {
+    if (!showImageFeatures) setModelInfoOpen(false);
+  }, [showImageFeatures]);
+
+  useEffect(() => {
+    if (!modelInfoOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (!modelInfoRef.current) return;
+      if (!modelInfoRef.current.contains(e.target as Node)) {
+        setModelInfoOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [modelInfoOpen]);
 
   useEffect(() => {
     if (isChat && currentSession) {
@@ -204,8 +194,9 @@ export function ChatInput({
   }, [isChat, currentSession?.id, refreshDocuments]);
 
   const updateMentionState = (value: string, caret: number) => {
-    if (!isChat) {
+    if (!isChat || showImageFeatures) {
       setMentionOpen(false);
+      setMentionQuery('');
       return;
     }
     const upto = value.slice(0, caret);
@@ -230,13 +221,7 @@ export function ChatInput({
     const text = prompt.trim();
     if (!text || sending) return;
 
-    if (isChat) {
-      const result = validateChatPrompt(text, chatModel);
-      if (!result.valid) {
-        showToast(result.message);
-        return;
-      }
-    } else {
+    if (showImageFeatures) {
       const result = validateImagePrompt(text, imageModel);
       if (!result.valid) {
         showToast(result.message);
@@ -254,6 +239,12 @@ export function ChatInput({
         showToast('이미지 업로드가 완료될 때까지 기다려 주세요.');
         return;
       }
+    } else {
+      const result = validateChatPrompt(text, chatModel);
+      if (!result.valid) {
+        showToast(result.message);
+        return;
+      }
     }
 
     setPrompt('');
@@ -264,11 +255,21 @@ export function ChatInput({
     } else if (isRegenerateImageMode && currentSession) {
       clearRegenerateImagePrompt();
       await regenerateImage(currentSession.id, { prompt: text });
-    } else if (isChat) {
-      await sendChatMessage(text, chatModel);
+    } else if (showImageFeatures) {
+      const success = await sendImageRequest(text, imageModel);
+      if (success) {
+        clearAttachmentItems(sessionId);
+        setReferenceImageUrl(sessionId, null);
+        setReferenceImageId(sessionId, null);
+      }
     } else {
-      await sendImageRequest(text, imageModel);
+      await sendChatMessage(text, chatModel);
     }
+    // 전송 후 포커스 유지 (한 프레임 뒤에 실행해 스크롤 후에 적용)
+    const inputEl = inputRef.current;
+    requestAnimationFrame(() => {
+      inputEl?.focus({ preventScroll: true });
+    });
   };
 
   const sortedDocuments = isChat
@@ -279,7 +280,7 @@ export function ChatInput({
         doc.original_name.toLowerCase().includes(mentionQuery.toLowerCase())
       )
     : [];
-  const mentionVisible = mentionOpen && mentionCandidates.length > 0;
+  const mentionVisible = !showImageFeatures && mentionOpen && mentionCandidates.length > 0;
 
   const selectMention = (docName: string) => {
     const input = inputRef.current;
@@ -314,7 +315,8 @@ export function ChatInput({
   const handleUploadReference = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !currentSession || currentSession.kind !== 'image') return;
+    if (!file || !currentSession) return;
+    if (!showImageFeatures) return;
     if (!file.type.startsWith('image/')) {
       showToast('이미지 파일만 업로드할 수 있습니다 (JPEG, PNG, WebP)');
       return;
@@ -334,7 +336,7 @@ export function ChatInput({
   const handleUploadAttachments = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!files.length || !currentSession || currentSession.kind !== 'image') return;
+    if (!files.length || !currentSession || !showImageFeatures) return;
     if (maxAttachments <= 0) {
       showToast(attachmentPolicy.blockMessage || '이 모델은 이미지 첨부를 지원하지 않습니다.');
       return;
@@ -386,12 +388,36 @@ export function ChatInput({
     attachInputRef.current?.click();
   };
 
-  const supportsReference = !isChat && imageModelSupportsReference(imageModel);
+  const handlePlusClick = () => {
+    if (!isChat) {
+      handleAttachmentClick();
+      return;
+    }
+    if (!showImageFeatures) {
+      setChatInputMode(currentSession.id, 'image');
+      showToast('이미지 모드로 전환되었습니다. + 버튼으로 이미지를 첨부하세요.');
+      return;
+    }
+    handleAttachmentClick();
+  };
+
+  const handleMicClick = () => {
+    showToast('음성 입력은 준비 중입니다.');
+  };
+
+  const supportsReference = showImageFeatures && imageModelSupportsReference(imageModel);
   const hasRefImage = hasReference;
 
-  const promptMaxLen = isChat
-    ? (CHAT_PROMPT_MAX_LENGTH_BY_MODEL[chatModel] ?? CHAT_PROMPT_MAX_LENGTH)
-    : (IMAGE_PROMPT_MAX_LENGTH_BY_MODEL[imageModel] ?? IMAGE_PROMPT_MAX_LENGTH);
+  const handleImageModelChange = (nextModel: string) => {
+    if (nextModel === imageModel) return;
+    setImageModel(currentSession.id, nextModel);
+    setModelInfoOpen(false);
+    showToast(getImageModelGuide(nextModel, { hasReference }).toast);
+  };
+
+  const promptMaxLen = showImageFeatures
+    ? (IMAGE_PROMPT_MAX_LENGTH_BY_MODEL[imageModel] ?? IMAGE_PROMPT_MAX_LENGTH)
+    : (CHAT_PROMPT_MAX_LENGTH_BY_MODEL[chatModel] ?? CHAT_PROMPT_MAX_LENGTH);
   const showCharCount = prompt.length > 0 && prompt.length >= promptMaxLen * 0.8;
   const isOverLimit = prompt.length > promptMaxLen;
 
@@ -420,7 +446,7 @@ export function ChatInput({
         style={rightOffset > 0 ? { right: rightOffset } : undefined}
       >
       {error && (
-        <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between rounded-lg bg-destructive/50 text-destructive-foreground px-3 py-2 text-sm animate-fade-in-up">
+        <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between rounded-lg border border-destructive/45 bg-destructive/18 text-destructive-foreground px-3 py-2 text-sm animate-fade-in-up">
           <span>{error}</span>
           <button type="button" onClick={clearError} className="hover:text-primary transition-colors duration-200">
             닫기
@@ -429,98 +455,28 @@ export function ChatInput({
       )}
       <form
         onSubmit={handleSubmit}
-        className="max-w-3xl mx-auto rounded-2xl border border-border bg-background shadow-sm overflow-visible animate-fade-in-up"
+        className="max-w-[min(880px,calc(100vw-2rem))] mx-auto rounded-[30px] border border-border/40 bg-card/52 backdrop-blur-2xl overflow-visible transition-[opacity] duration-200 ease-out shadow-[0_18px_60px_hsl(var(--background)/0.55),inset_0_1px_0_hsl(var(--foreground)/0.04)]"
       >
         {/* 위쪽: 미디어 버튼 + 입력 + 전송 */}
-        <div className="flex items-center gap-2 p-3">
-          {!isChat && (
-            <>
-              <input
-                ref={attachInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                multiple
-                onChange={handleUploadAttachments}
-                disabled={uploadingAttachments || sending}
-              />
-              <button
-                type="button"
-                onClick={handleAttachmentClick}
-                disabled={uploadingAttachments || sending}
-                className={`shrink-0 flex items-center justify-center w-11 h-11 rounded-xl border transition-colors duration-200 disabled:opacity-50 ${
-                  attachmentCount > 0
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title={
-                  attachmentCount > 0
-                    ? (maxAttachments > 0 ? `첨부 이미지 ${attachmentCount}/${maxAttachments}` : `첨부 이미지 ${attachmentCount}개`)
-                    : '이미지 첨부'
-                }
-                aria-label="이미지 첨부"
-              >
-                {uploadingAttachments ? <span className="text-xs">…</span> : <Paperclip size={18} />}
-              </button>
-              {attachmentCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => clearAttachmentItems(sessionId)}
-                  className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  aria-label="첨부 해제"
-                  title="첨부 해제"
-                >
-                  <X size={18} />
-                </button>
-              )}
-            </>
-          )}
-          {supportsReference && (
-            <>
-              <input
-                ref={uploadInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                onChange={handleUploadReference}
-                disabled={uploadingRef || sending}
-              />
-              <button
-                type="button"
-                onClick={() => uploadInputRef.current?.click()}
-                disabled={uploadingRef || sending}
-                className={`shrink-0 flex items-center justify-center w-11 h-11 rounded-xl border transition-colors duration-200 disabled:opacity-50 ${
-                  hasRefImage
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title={hasRefImage ? '참조 이미지 사용 중' : '참조 이미지 업로드'}
-                aria-label={hasRefImage ? '참조 이미지 사용 중' : '참조 이미지 업로드'}
-              >
-                {uploadingRef ? (
-                  <span className="text-xs">…</span>
-                ) : hasRefImage ? (
-                  <ImagePlus size={20} />
-                ) : (
-                  <Upload size={20} />
-                )}
-              </button>
-              {hasRefImage && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setReferenceImageUrl(currentSession.id, null);
-                    setReferenceImageId(currentSession.id, null);
-                  }}
-                  className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  aria-label="참조 해제"
-                >
-                  <X size={18} />
-                </button>
-              )}
-            </>
-          )}
-          <div className="relative flex-1 flex items-center">
+        <div className="flex items-start gap-2 px-4 pt-3 pb-2 transition-opacity duration-200 ease-out">
+          <input
+            ref={attachInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            multiple
+            onChange={handleUploadAttachments}
+            disabled={uploadingAttachments || sending}
+          />
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={handleUploadReference}
+            disabled={uploadingRef || sending}
+          />
+          <div className="relative flex-1 px-2 py-1.5">
             <textarea
               ref={inputRef}
               rows={1}
@@ -534,13 +490,13 @@ export function ChatInput({
               }}
               onKeyDown={(e) => {
                 if ((e.nativeEvent as KeyboardEvent).isComposing) return;
-                if (e.key === 'Enter' && !e.shiftKey && (!mentionOpen || mentionCandidates.length === 0)) {
+                if (e.key === 'Enter' && !e.shiftKey && !mentionVisible) {
                   e.preventDefault();
                   const form = (e.currentTarget as HTMLTextAreaElement).form;
                   if (form) form.requestSubmit();
                   return;
                 }
-                if (!mentionOpen || mentionCandidates.length === 0) return;
+                if (!mentionVisible) return;
                 if (e.key === 'ArrowDown') {
                   e.preventDefault();
                   setMentionIndex((prev) => (prev + 1) % mentionCandidates.length);
@@ -564,11 +520,11 @@ export function ChatInput({
                   ? '수정 후 Enter 또는 재질문 버튼으로 재생성'
                   : isRegenerateImageMode
                     ? '수정 후 Enter 또는 재생성 버튼으로 재생성'
-                    : isChat
-                      ? '메시지를 입력하세요...'
-                      : '이미지 설명을 입력하세요...'
+                    : showImageFeatures
+                      ? '이미지 설명을 입력하세요...'
+                      : '메시지를 입력하세요...'
               }
-              className="w-full min-h-[48px] max-h-[160px] py-2.5 pl-4 pr-12 text-base text-foreground placeholder-muted-foreground bg-muted/40 rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-colors duration-200 resize-none leading-6"
+              className="w-full min-h-[102px] max-h-[240px] bg-transparent p-0 pr-10 text-base text-foreground placeholder-muted-foreground border-0 focus:outline-none focus:ring-0 resize-none leading-7"
               disabled={sending}
               maxLength={promptMaxLen}
               aria-invalid={isOverLimit}
@@ -584,7 +540,7 @@ export function ChatInput({
               </span>
             )}
             {mentionVisible && (
-              <div className="absolute left-0 right-0 bottom-full mb-2 z-20 rounded-xl border border-border bg-background shadow-lg overflow-hidden">
+              <div className="absolute left-0 right-0 bottom-full mb-2 z-20 rounded-2xl border border-border/65 bg-card/94 backdrop-blur-xl overflow-hidden">
                 <div className="max-h-56 overflow-y-auto">
                   {mentionCandidates.map((doc, idx) => (
                     <button
@@ -613,83 +569,50 @@ export function ChatInput({
               </div>
             )}
           </div>
-          {sending ? (
-            <button
-              type="button"
-              onClick={stopGeneration}
-              className="shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-destructive text-destructive-foreground font-medium hover:bg-destructive/90 transition-colors duration-200"
-              aria-label="중단"
-            >
-              <X size={22} />
-            </button>
-          ) : isRegenerateMode ? (
-            <>
-              <button
-                type="button"
-                onClick={() => { clearRegeneratePrompt(); setPrompt(''); }}
-                className="shrink-0 px-4 h-12 rounded-xl text-muted-foreground font-medium hover:text-foreground hover:bg-muted transition-colors duration-200"
-              >
-                취소
-              </button>
-              <button
-                type="submit"
-                disabled={!prompt.trim()}
-                className="shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors duration-200"
-                aria-label="재질문"
-              >
-                <ArrowUp size={22} />
-              </button>
-            </>
-          ) : isRegenerateImageMode ? (
-            <>
-              <button
-                type="button"
-                onClick={() => { clearRegenerateImagePrompt(); setPrompt(''); }}
-                className="shrink-0 px-4 h-12 rounded-xl text-muted-foreground font-medium hover:text-foreground hover:bg-muted transition-colors duration-200"
-              >
-                취소
-              </button>
-              <button
-                type="submit"
-                disabled={!prompt.trim()}
-                className="shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors duration-200"
-                aria-label="재생성"
-              >
-                <ArrowUp size={22} />
-              </button>
-            </>
-          ) : (
-            <button
-              type="submit"
-              disabled={!prompt.trim()}
-              className="shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors duration-200"
-              aria-label={isChat ? '전송' : '생성'}
-            >
-              <ArrowUp size={22} />
-            </button>
-          )}
         </div>
 
-        {!isChat && attachmentCount > 0 && (
-          <div className="px-3 pb-2">
+        {showImageFeatures && (attachmentCount > 0 || hasRefImage) && (
+          <div className="px-3 pb-1">
             <div className="flex flex-wrap gap-2">
+              {hasRefImage && (
+                <div className="inline-flex items-center gap-2 rounded-full border border-border/65 bg-secondary/52 pl-1.5 pr-3 py-1">
+                  {referenceImageUrl ? (
+                    <img src={referenceImageUrl} alt="참조 이미지" className="w-7 h-7 rounded-full object-cover border border-border/70" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full border border-border/70 bg-muted/40 flex items-center justify-center text-[10px] text-muted-foreground">
+                      REF
+                    </div>
+                  )}
+                  <span className="text-xs text-foreground">참조 이미지</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReferenceImageUrl(currentSession.id, null);
+                      setReferenceImageId(currentSession.id, null);
+                    }}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-secondary/75"
+                    aria-label="참조 이미지 삭제"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
               {attachmentItems.map((item, idx) => (
-                <div key={`${item.previewUrl}-${idx}`} className="relative w-16 h-16 rounded-lg border border-border overflow-hidden bg-muted/40">
-                  <img src={item.previewUrl || item.remoteUrl} alt={`attachment-${idx + 1}`} className="w-full h-full object-cover" />
-                  {item.status === 'uploading' && (
-                    <div className="absolute inset-0 bg-black/50 text-white text-[10px] flex items-center justify-center">
-                      업로드 중
-                    </div>
-                  )}
-                  {item.status === 'error' && (
-                    <div className="absolute inset-0 bg-destructive/70 text-destructive-foreground text-[10px] flex items-center justify-center">
-                      실패
-                    </div>
-                  )}
+                <div key={`${item.previewUrl}-${idx}`} className="inline-flex items-center gap-2 rounded-full border border-border/65 bg-secondary/52 pl-1.5 pr-3 py-1">
+                  <div className="relative">
+                    <img src={item.previewUrl || item.remoteUrl} alt={`attachment-${idx + 1}`} className="w-7 h-7 rounded-full object-cover border border-border/70" />
+                    {item.status === 'uploading' && (
+                      <span className="absolute -bottom-1 -right-1 rounded-full bg-card px-1 text-[9px] leading-4 border border-border/70">…</span>
+                    )}
+                    {item.status === 'error' && (
+                      <span className="absolute -bottom-1 -right-1 rounded-full bg-destructive/20 px-1 text-[9px] leading-4 border border-destructive/50">!</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-foreground">첨부 이미지 {idx + 1}</span>
                   <button
                     type="button"
                     onClick={() => removeAttachmentItem(sessionId, idx)}
-                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-secondary/75"
                     aria-label="첨부 이미지 삭제"
                   >
                     <X size={12} />
@@ -701,112 +624,263 @@ export function ChatInput({
         )}
 
         {/* 아래쪽: 모델 + 설정 (펼침) */}
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-3 pt-0 border-t border-border/50 [&_select]:min-h-0 [&_select]:h-9 [&_select]:py-1.5 [&_select]:min-w-[160px]">
-          <ModelSelector
-            kind={currentSession.kind}
-            value={isChat ? chatModel : imageModel}
-            onChange={isChat ? (m) => setChatModel(currentSession.id, m) : (m) => setImageModel(currentSession.id, m)}
-          />
-          {!isChat && modelSettings && imageSettings && (
-            <>
+        <div className="relative px-4 pb-2 pt-1 [&_select]:min-h-0 [&_select]:h-9 [&_select]:py-1.5 [&_select]:min-w-[170px]">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="inline-flex min-w-max items-center gap-3 pr-2">
+                <button
+                  type="button"
+                  onClick={handlePlusClick}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary/45 hover:text-foreground"
+                  aria-label="첨부 메뉴"
+                  title={showImageFeatures ? '이미지 첨부' : '이미지 모드로 전환'}
+                >
+                  {showImageFeatures && uploadingAttachments ? <span className="text-xs">…</span> : <Plus size={19} />}
+                </button>
+                {isChat && (
+                  <div className="flex items-center gap-4 px-1">
+                    <button
+                      type="button"
+                      onClick={() => setChatInputMode(currentSession.id, 'text')}
+                      className={`text-sm transition-colors ${
+                        getChatInputMode(currentSession.id) === 'text'
+                          ? 'text-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      aria-label="텍스트 모드"
+                    >
+                      텍스트
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChatInputMode(currentSession.id, 'image')}
+                      className={`text-sm transition-colors ${
+                        getChatInputMode(currentSession.id) === 'image'
+                          ? 'text-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      aria-label="이미지 모드"
+                    >
+                      이미지
+                    </button>
+                  </div>
+                )}
+                <ModelSelector
+                  kind={isChat ? (getChatInputMode(currentSession.id) === 'image' ? 'image' : 'chat') : 'image'}
+                  value={isChat ? (getChatInputMode(currentSession.id) === 'image' ? imageModel : chatModel) : imageModel}
+                  onChange={isChat ? (getChatInputMode(currentSession.id) === 'image' ? handleImageModelChange : (m) => setChatModel(currentSession.id, m)) : handleImageModelChange}
+                />
+                {showImageFeatures && supportsReference && (
+                  <button
+                    type="button"
+                    onClick={() => uploadInputRef.current?.click()}
+                    disabled={uploadingRef || sending}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary/45 hover:text-foreground disabled:opacity-50"
+                    title={hasRefImage ? '참조 이미지 변경' : '참조 이미지 업로드'}
+                    aria-label={hasRefImage ? '참조 이미지 변경' : '참조 이미지 업로드'}
+                  >
+                    {uploadingRef ? <span className="text-xs">…</span> : hasRefImage ? <ImagePlus size={16} /> : <Upload size={16} />}
+                  </button>
+                )}
+                {showImageFeatures && modelGuide && (
+                  <div ref={modelInfoRef}>
+                    <button
+                      type="button"
+                      onClick={() => setModelInfoOpen((v) => !v)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary/45 hover:text-foreground"
+                      aria-label="모델 가능 작업 보기"
+                      title="모델 가능 작업 보기"
+                    >
+                      <Info size={15} />
+                    </button>
+                  </div>
+                )}
+                {showImageFeatures && modelSettings && imageSettings && (
+                  <button
+                    type="button"
+                    onClick={() => setImageSettingsOpen((v) => !v)}
+                    className="flex items-center gap-1.5 px-1.5 py-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors duration-200"
+                  >
+                    <Settings2 size={16} />
+                    설정
+                    <ChevronDown
+                      size={14}
+                      className={`shrink-0 transition-transform duration-200 ease-out ${imageSettingsOpen ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="shrink-0 flex items-center gap-2 pb-0.5">
+            {!sending && (
               <button
                 type="button"
-                onClick={() => setImageSettingsOpen((v) => !v)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors duration-200"
+                onClick={handleMicClick}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary/45 hover:text-foreground"
+                aria-label="음성 입력"
               >
-                <Settings2 size={16} />
-                설정
-                <ChevronDown
-                  size={14}
-                  className={`shrink-0 transition-transform duration-200 ease-out ${imageSettingsOpen ? 'rotate-180' : ''}`}
-                />
+                <Mic size={18} />
               </button>
-              <div
-                className={`grid w-full transition-[grid-template-rows] duration-200 ease-out ${
-                  imageSettingsOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-                }`}
+            )}
+            {sending ? (
+              <button
+                type="button"
+                onClick={stopGeneration}
+                className="shrink-0 flex items-center justify-center w-12 h-12 rounded-full border border-destructive/50 bg-destructive/20 text-destructive-foreground font-medium hover:bg-destructive/28 transition-colors duration-200"
+                aria-label="중단"
               >
-                <div className="min-h-0 overflow-hidden">
-                  <div className="flex flex-wrap items-center gap-2 pl-0 pt-2">
+                <X size={20} />
+              </button>
+            ) : isRegenerateMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { clearRegeneratePrompt(); setPrompt(''); }}
+                  className="shrink-0 px-3 h-10 rounded-full border border-border/70 bg-secondary/48 text-muted-foreground font-medium hover:text-foreground hover:bg-secondary/75 transition-colors duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={!prompt.trim()}
+                  className="shrink-0 flex items-center justify-center w-12 h-12 rounded-full border border-foreground/80 bg-foreground text-background hover:bg-foreground/90 disabled:bg-secondary/42 disabled:text-muted-foreground disabled:border-border/60 disabled:opacity-100 disabled:cursor-not-allowed transition-colors duration-200"
+                  aria-label="재질문"
+                >
+                  <ArrowUp size={20} />
+                </button>
+              </>
+            ) : isRegenerateImageMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { clearRegenerateImagePrompt(); setPrompt(''); }}
+                  className="shrink-0 px-3 h-10 rounded-full border border-border/70 bg-secondary/48 text-muted-foreground font-medium hover:text-foreground hover:bg-secondary/75 transition-colors duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={!prompt.trim()}
+                  className="shrink-0 flex items-center justify-center w-12 h-12 rounded-full border border-foreground/80 bg-foreground text-background hover:bg-foreground/90 disabled:bg-secondary/42 disabled:text-muted-foreground disabled:border-border/60 disabled:opacity-100 disabled:cursor-not-allowed transition-colors duration-200"
+                  aria-label="재생성"
+                >
+                  <ArrowUp size={20} />
+                </button>
+              </>
+            ) : (
+              <button
+                type="submit"
+                disabled={!prompt.trim()}
+                className="shrink-0 flex items-center justify-center w-12 h-12 rounded-full border border-foreground/80 bg-foreground text-background hover:bg-foreground/90 disabled:bg-secondary/42 disabled:text-muted-foreground disabled:border-border/60 disabled:opacity-100 disabled:cursor-not-allowed transition-colors duration-200"
+                aria-label={showImageFeatures ? '생성' : '전송'}
+              >
+                <ArrowUp size={20} />
+              </button>
+            )}
+            </div>
+          </div>
+
+          {showImageFeatures && modelGuide && modelInfoOpen && (
+            <div className="mt-2">
+              <div className="rounded-lg border border-border/65 bg-secondary/45 backdrop-blur-sm p-3">
+                <p className="text-sm font-semibold text-foreground">{modelGuide.modelName}</p>
+                <div className="mt-2 space-y-2">
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground">가능한 작업</p>
+                    <ul className="mt-1 space-y-1">
+                      {modelGuide.capabilities.map((line) => (
+                        <li key={`cap-${line}`} className="text-xs text-foreground">- {line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground">제한/불가능</p>
+                    <ul className="mt-1 space-y-1">
+                      {modelGuide.limitations.map((line) => (
+                        <li key={`limit-${line}`} className="text-xs text-muted-foreground">- {line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {showImageFeatures && modelSettings && imageSettings && (
+            <div
+              className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                imageSettingsOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+              }`}
+            >
+              <div className="min-h-0 overflow-hidden">
+                <div className="flex flex-wrap items-center gap-2 pl-0 pt-2">
+                <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span>비율</span>
+                  <select
+                    value={imageSettings.aspect_ratio}
+                    onChange={(e) => setImageSettings(currentSession.id, { aspect_ratio: e.target.value })}
+                    className="bg-secondary/55 border border-border/70 rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {modelSettings.aspectRatios.map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span>생성 수</span>
+                  <select
+                    value={imageSettings.num_images}
+                    onChange={(e) => setImageSettings(currentSession.id, { num_images: Number(e.target.value) })}
+                    className="bg-secondary/55 border border-border/70 rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {Array.from({ length: modelSettings.numImagesMax }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </label>
+                {modelSettings.resolutions && modelSettings.resolutions.length > 0 && (
                   <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <span>비율</span>
+                    <span>해상도</span>
                     <select
-                      value={imageSettings.aspect_ratio}
-                      onChange={(e) => setImageSettings(currentSession.id, { aspect_ratio: e.target.value })}
-                      className="bg-muted/50 border border-border rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={imageSettings.resolution ?? ''}
+                      onChange={(e) => setImageSettings(currentSession.id, { resolution: e.target.value || undefined })}
+                      className="bg-secondary/55 border border-border/70 rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                     >
-                      {modelSettings.aspectRatios.map((r) => (
+                      {modelSettings.resolutions.map((r) => (
                         <option key={r} value={r}>{r}</option>
                       ))}
                     </select>
                   </label>
+                )}
+                {modelSettings.outputFormats && modelSettings.outputFormats.length > 0 && (
                   <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <span>생성 수</span>
+                    <span>포맷</span>
                     <select
-                      value={imageSettings.num_images}
-                      onChange={(e) => setImageSettings(currentSession.id, { num_images: Number(e.target.value) })}
-                      className="bg-muted/50 border border-border rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={imageSettings.output_format ?? ''}
+                      onChange={(e) => setImageSettings(currentSession.id, { output_format: e.target.value || undefined })}
+                      className="bg-secondary/55 border border-border/70 rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                     >
-                      {Array.from({ length: modelSettings.numImagesMax }, (_, i) => i + 1).map((n) => (
-                        <option key={n} value={n}>{n}</option>
+                      {modelSettings.outputFormats.map((f) => (
+                        <option key={f} value={f}>{f}</option>
                       ))}
                     </select>
                   </label>
-                  {modelSettings.resolutions && modelSettings.resolutions.length > 0 && (
-                    <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                      <span>해상도</span>
-                      <select
-                        value={imageSettings.resolution ?? ''}
-                        onChange={(e) => setImageSettings(currentSession.id, { resolution: e.target.value || undefined })}
-                        className="bg-muted/50 border border-border rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      >
-                        {modelSettings.resolutions.map((r) => (
-                          <option key={r} value={r}>{r}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  {modelSettings.outputFormats && modelSettings.outputFormats.length > 0 && (
-                    <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                      <span>포맷</span>
-                      <select
-                        value={imageSettings.output_format ?? ''}
-                        onChange={(e) => setImageSettings(currentSession.id, { output_format: e.target.value || undefined })}
-                        className="bg-muted/50 border border-border rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      >
-                        {modelSettings.outputFormats.map((f) => (
-                          <option key={f} value={f}>{f}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  {modelSettings.supportsSeed && (
-                    <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                      <span>Seed</span>
-                      <input
-                        type="number"
-                        value={imageSettings.seed ?? ''}
-                        onChange={(e) => {
-                          const v = e.target.value.trim();
-                          setImageSettings(currentSession.id, { seed: v === '' ? undefined : Number(v) });
-                        }}
-                        placeholder="—"
-                        className="w-20 bg-muted/50 border border-border rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                    </label>
-                  )}
-                  </div>
+                )}
+                {modelSettings.supportsSeed && (
+                  <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <span>Seed</span>
+                    <input
+                      type="number"
+                      value={imageSettings.seed ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value.trim();
+                        setImageSettings(currentSession.id, { seed: v === '' ? undefined : Number(v) });
+                      }}
+                      placeholder="—"
+                      className="w-20 bg-secondary/55 border border-border/70 rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </label>
+                )}
                 </div>
-              </div>
-            </>
-          )}
-          {!isChat && modelInfoLines.length > 0 && (
-            <div className="w-full flex items-start gap-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              <Info size={14} className="mt-0.5" />
-              <div className="flex flex-col gap-1">
-                {modelInfoLines.map((line) => (
-                  <p key={line}>- {line}</p>
-                ))}
               </div>
             </div>
           )}

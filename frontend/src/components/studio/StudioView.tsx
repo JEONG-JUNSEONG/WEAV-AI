@@ -133,7 +133,7 @@ const AutoResizeTextarea: React.FC<{
   }, [value]);
 
   return (
-    <div className={`${isHighlighted ? 'ring-2 ring-rose-500 rounded-2xl' : ''}`}>
+    <div className={`${isHighlighted ? 'ring-2 ring-primary/60 rounded-2xl' : ''}`}>
       <textarea
         ref={textareaRef}
         value={value}
@@ -241,25 +241,25 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
 
   // 인기 카테고리: YouTube 공식 video category 한글 표기 (categoryId 기준)
   const mainstreamCategories = [
-    { name: '뉴스/정치', icon: <Globe size={20} />, color: 'bg-blue-50 text-blue-600', categoryId: '25' },
-    { name: '여행/이벤트', icon: <Map size={20} />, color: 'bg-sky-50 text-sky-600', categoryId: '19' },
-    { name: '팁/스타일', icon: <Utensils size={20} />, color: 'bg-rose-50 text-rose-600', categoryId: '26' },
-    { name: '사람/블로그', icon: <Camera size={20} />, color: 'bg-indigo-50 text-indigo-600', categoryId: '22' },
-    { name: '과학/기술', icon: <Microscope size={20} />, color: 'bg-emerald-50 text-emerald-600', categoryId: '28' },
-    { name: '영화/애니메이션', icon: <Film size={20} />, color: 'bg-pink-50 text-pink-600', categoryId: '1' },
-    { name: '엔터테인먼트', icon: <Gift size={20} />, color: 'bg-amber-50 text-amber-600', categoryId: '24' },
-    { name: '교육', icon: <Activity size={20} />, color: 'bg-green-50 text-green-600', categoryId: '27' },
+    { name: '뉴스/정치', icon: <Globe size={20} />, color: 'bg-secondary text-foreground', categoryId: '25' },
+    { name: '여행/이벤트', icon: <Map size={20} />, color: 'bg-secondary text-foreground', categoryId: '19' },
+    { name: '팁/스타일', icon: <Utensils size={20} />, color: 'bg-secondary text-foreground', categoryId: '26' },
+    { name: '사람/블로그', icon: <Camera size={20} />, color: 'bg-secondary text-foreground', categoryId: '22' },
+    { name: '과학/기술', icon: <Microscope size={20} />, color: 'bg-secondary text-foreground', categoryId: '28' },
+    { name: '영화/애니메이션', icon: <Film size={20} />, color: 'bg-secondary text-foreground', categoryId: '1' },
+    { name: '엔터테인먼트', icon: <Gift size={20} />, color: 'bg-secondary text-foreground', categoryId: '24' },
+    { name: '교육', icon: <Activity size={20} />, color: 'bg-secondary text-foreground', categoryId: '27' },
   ];
 
   const nicheCategories = [
-    { name: '미스터리', icon: <Ghost size={20} />, color: 'bg-slate-900 text-white', categoryId: '24' },
-    { name: '전문가 노하우', icon: <PenTool size={20} />, color: 'bg-slate-50 text-slate-600', categoryId: '27' },
-    { name: '오프그리드', icon: <Leaf size={20} />, color: 'bg-emerald-50 text-emerald-600', categoryId: '28' },
-    { name: '골동품 복원', icon: <Settings2 size={20} />, color: 'bg-blue-50 text-blue-600', categoryId: '26' },
-    { name: '밀리터리', icon: <Sword size={20} />, color: 'bg-indigo-50 text-indigo-600', categoryId: '20' },
-    { name: '심리 상담', icon: <Heart size={20} />, color: 'bg-rose-50 text-rose-600', categoryId: '22' },
-    { name: '아카이브/역사', icon: <History size={20} />, color: 'bg-amber-50 text-amber-600', categoryId: '27' },
-    { name: '로컬 탐방', icon: <Compass size={20} />, color: 'bg-sky-50 text-sky-600', categoryId: '19' },
+    { name: '미스터리', icon: <Ghost size={20} />, color: 'bg-secondary text-foreground', categoryId: '24' },
+    { name: '전문가 노하우', icon: <PenTool size={20} />, color: 'bg-secondary text-foreground', categoryId: '27' },
+    { name: '오프그리드', icon: <Leaf size={20} />, color: 'bg-secondary text-foreground', categoryId: '28' },
+    { name: '골동품 복원', icon: <Settings2 size={20} />, color: 'bg-secondary text-foreground', categoryId: '26' },
+    { name: '밀리터리', icon: <Sword size={20} />, color: 'bg-secondary text-foreground', categoryId: '20' },
+    { name: '심리 상담', icon: <Heart size={20} />, color: 'bg-secondary text-foreground', categoryId: '22' },
+    { name: '아카이브/역사', icon: <History size={20} />, color: 'bg-secondary text-foreground', categoryId: '27' },
+    { name: '로컬 탐방', icon: <Compass size={20} />, color: 'bg-secondary text-foreground', categoryId: '19' },
   ];
 
   const categories = templateMode === 'mainstream' ? mainstreamCategories : nicheCategories;
@@ -479,20 +479,20 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
               </button>
             </div>
             {urlAnalysisData && (
-              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="mt-4 p-4 rounded-xl bg-secondary/50 border border-border/70 space-y-3">
                 <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
                   패턴 분석 결과
                 </div>
                 {urlAnalysisData.summary && (
                   <div>
-                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">요약</span>
+                    <span className="text-xs font-medium text-slate-500">요약</span>
                     <p className="mt-1 text-sm text-slate-800">{urlAnalysisData.summary}</p>
                   </div>
                 )}
                 {urlAnalysisData.patterns?.length > 0 && (
                   <div>
-                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">패턴 (클릭하여 선택 후 주제 생성 시 반영)</span>
+                    <span className="text-xs font-medium text-slate-500">패턴 (클릭하여 선택 후 주제 생성 시 반영)</span>
                     <ul className="mt-1 flex flex-wrap gap-2">
                       {urlAnalysisData.patterns.map((p: string, i: number) => {
                         const isSelected = selectedBenchmarkPatterns.includes(p);
@@ -503,8 +503,8 @@ const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) 
                               onClick={() => toggleBenchmarkPattern(p)}
                               className={`px-2.5 py-1 rounded-md border text-sm transition-colors ${
                                 isSelected
-                                  ? 'bg-slate-200 border-slate-500 text-slate-900'
-                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                                  ? 'bg-primary/16 border-primary/45 text-foreground'
+                                  : 'bg-secondary/55 border-border/70 text-slate-700 hover:bg-secondary/75'
                               }`}
                             >
                               {p}
@@ -731,14 +731,14 @@ const ScriptPlanningStep = () => {
   return (
     <div className="space-y-10 pb-24 relative max-w-[1200px] mx-auto">
       {isPreviewOpen && (
-        <div className="fixed inset-0 z-[150] bg-slate-900/95 backdrop-blur-3xl flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-[150] bg-background/86 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="max-w-5xl w-full ui-card relative space-y-6">
             <button onClick={() => setIsPreviewOpen(false)} className="ui-btn ui-btn--ghost absolute right-4 top-4">
               <X size={16} />
             </button>
             <div className="space-y-2 pr-10">
               <span className="ui-label">{reviewMode === 'architecture' ? '설계안 검토' : '시나리오 교정'}</span>
-              <h2 className="font-serif text-2xl text-slate-900">
+              <h2 className="font-serif text-2xl text-foreground">
                 {reviewMode === 'architecture' ? '기획 파트 흐름 점검' : '완성 원고 확인'}
               </h2>
               <p className="text-sm text-slate-600">
@@ -858,7 +858,7 @@ const ScriptPlanningStep = () => {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <span className="ui-label">현재 파트</span>
-                <h3 className="font-serif text-2xl text-slate-900">
+                <h3 className="font-serif text-2xl text-foreground">
                   {steps[activeSubStep - 1].name.replace(/^\d+\)\s/, '')}
                 </h3>
               </div>
@@ -1162,7 +1162,7 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
               onDragOver={(e) => { e.preventDefault(); setIsImgDragging(true); }}
               onDragLeave={() => setIsImgDragging(false)}
               onDrop={(e) => { e.preventDefault(); setIsImgDragging(false); if (e.dataTransfer.files[0]) handleImgUpload(e.dataTransfer.files[0]); }}
-              className={`aspect-square rounded-2xl border border-dashed flex items-center justify-center overflow-hidden cursor-pointer ${isImgDragging ? 'bg-rose-50 border-rose-500' : 'border-slate-300 bg-white'}`}
+              className={`aspect-square rounded-2xl border border-dashed flex items-center justify-center overflow-hidden cursor-pointer ${isImgDragging ? 'bg-primary/12 border-primary/45' : 'border-border/70 bg-secondary/45'}`}
             >
               {referenceImage ? (
                 <img src={referenceImage} className="w-full h-full object-cover" />
@@ -1224,10 +1224,10 @@ const ImageAndScriptStep = ({ showToast }: { showToast: (msg: string) => void })
                   </div>
 
                   <div className="space-y-3">
-                    <div className="aspect-video rounded-2xl border border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden relative">
+                    <div className="aspect-video rounded-2xl border border-dashed border-border/70 bg-secondary/45 flex items-center justify-center overflow-hidden relative">
                       {scene.isGenerating && (
-                        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
-                          <Loader2 size={20} className="animate-spin text-rose-600" />
+                        <div className="absolute inset-0 bg-card/80 backdrop-blur-sm flex items-center justify-center">
+                          <Loader2 size={20} className="animate-spin text-primary" />
                         </div>
                       )}
                       {scene.imageUrl ? (
@@ -1439,7 +1439,7 @@ const VoiceStep = () => {
                 <div key={seg.id} className="ui-card flex items-center gap-4">
                   <span className="ui-step__num is-selected">{(idx + 1).toString().padStart(2, '0')}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-900 truncate">{seg.text}</p>
+                    <p className="text-sm font-medium text-foreground truncate">{seg.text}</p>
                     <p className="text-xs text-slate-500">{seg.durationSec > 0 ? `${seg.durationSec.toFixed(1)}초` : '—'} · 씬 {seg.sceneIndex}</p>
                   </div>
                   <span className="ui-pill">{seg.status === 'done' ? '완료' : '대기'}</span>
@@ -1754,12 +1754,12 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
             <LinkIcon size={14} /> 썸네일 불러오기
           </button>
         </div>
-        {ytThumbnailError && <p className="text-sm text-rose-600">유효한 유튜브 영상 URL을 입력해주세요.</p>}
+        {ytThumbnailError && <p className="text-sm text-destructive">유효한 유튜브 영상 URL을 입력해주세요.</p>}
 
         {ytThumbnailUrl && (
           <div className="space-y-3">
             <p className="text-sm text-slate-600">해당 영상 썸네일</p>
-            <div className="inline-block rounded-2xl border-2 border-slate-200 overflow-hidden bg-slate-100 max-w-md">
+            <div className="inline-block rounded-2xl border border-border/70 overflow-hidden bg-secondary/45 max-w-md">
               <img
                 src={ytThumbnailUrl}
                 alt="유튜브 썸네일"
@@ -1796,7 +1796,7 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
               key={t.id}
               type="button"
               onClick={() => selectThumb(t.id)}
-              className={`rounded-2xl border-2 overflow-hidden text-left transition-all ${t.isSelected ? 'border-rose-500 ring-2 ring-rose-200' : 'border-slate-200 hover:border-slate-300'}`}
+              className={`rounded-2xl border overflow-hidden text-left transition-all ${t.isSelected ? 'border-primary/50 ring-1 ring-primary/35' : 'border-border/70 hover:border-border/90'}`}
             >
               <div className="aspect-video bg-slate-100 flex items-center justify-center text-slate-400 font-medium text-sm overflow-hidden">
                 {t.imageUrl ? (
@@ -1806,8 +1806,8 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
                 )}
               </div>
               <div className="p-3 space-y-1">
-                <p className="text-sm font-semibold text-slate-900">{t.title}</p>
-                <p className="text-xs text-rose-600">{t.ctrHint}</p>
+                <p className="text-sm font-semibold text-foreground">{t.title}</p>
+                <p className="text-xs text-primary">{t.ctrHint}</p>
               </div>
             </button>
           ))}
@@ -1857,15 +1857,15 @@ const AppContent = ({ projectName }: { projectName: string }) => {
 
   return (
     <div 
-      className="ui-shell flex flex-1 text-slate-900 overflow-hidden font-sans relative"
+      className="ui-shell flex flex-1 text-foreground overflow-hidden font-sans relative"
       onDragOver={(e) => { e.preventDefault(); setIsGlobalDragging(true); }}
       onDragEnter={(e) => { e.preventDefault(); setIsGlobalDragging(true); }}
       onDragLeave={(e) => { if (e.relatedTarget === null) setIsGlobalDragging(false); }}
       onDrop={(e) => { e.preventDefault(); setIsGlobalDragging(false); if (e.dataTransfer.files[0]) handleFileAction(e.dataTransfer.files[0]); }}
     >
       {isLoading && (
-        <div className="absolute inset-0 z-[100] bg-white/90 backdrop-blur-md flex flex-col items-center justify-center">
-          <Loader2 size={40} className="text-rose-600 animate-spin mb-4"/>
+        <div className="absolute inset-0 z-[100] bg-background/82 backdrop-blur-sm flex flex-col items-center justify-center">
+          <Loader2 size={40} className="text-primary animate-spin mb-4"/>
           <p className="ui-label">{loadingMessage ?? '처리 중...'}</p>
         </div>
       )}
@@ -1873,14 +1873,14 @@ const AppContent = ({ projectName }: { projectName: string }) => {
       {toast && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[110] ui-card">
           <div className="flex items-center gap-3 text-sm text-slate-700">
-            <div className="w-2 h-2 rounded-full bg-rose-500" />
+            <div className="w-2 h-2 rounded-full bg-primary" />
             {String(toast)}
           </div>
         </div>
       )}
 
       {isGlobalDragging && (
-        <div className="absolute inset-0 z-[90] bg-slate-900/30 backdrop-blur-sm flex items-center justify-center text-white text-sm font-medium">
+        <div className="absolute inset-0 z-[90] bg-background/56 backdrop-blur-sm flex items-center justify-center text-foreground text-sm font-medium">
           파일을 놓아 업로드하세요
         </div>
       )}
@@ -1889,7 +1889,7 @@ const AppContent = ({ projectName }: { projectName: string }) => {
         <div className="p-6 lg:p-10 w-full">
           <div className="pb-8">
             <div className="mb-6 text-center">
-              <h1 className="font-serif text-3xl text-slate-900 mb-2">{projectName}</h1>
+              <h1 className="font-serif text-3xl text-foreground mb-2">{projectName}</h1>
               <span className="ui-label">WEAV Studio Project</span>
             </div>
             <div className="flex justify-center">
@@ -1955,7 +1955,7 @@ export function StudioView({ sessionId, projectName }: StudioViewProps) {
   }, [projectName]);
 
   return (
-    <div ref={containerRef} className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+    <div ref={containerRef} className="weav-studio-bg flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       <GlobalProvider sessionId={sessionId}>
         <AppContent projectName={projectName} />
       </GlobalProvider>

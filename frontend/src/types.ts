@@ -8,6 +8,8 @@ export interface Session {
   updated_at: string;
   messages?: Message[];
   image_records?: ImageRecord[];
+  /** 이미지 세션 전용: 참고용 이미지 URL 1~2개 (세션 기준 저장, 이후 생성 요청마다 사용) */
+  reference_image_urls?: string[];
 }
 
 export interface Message {
@@ -23,6 +25,12 @@ export interface ImageRecord {
   prompt: string;
   image_url: string;
   model: string;
+  metadata?: {
+    input_reference_urls?: string[];
+    input_attachment_urls?: string[];
+    input_image_urls?: string[];
+    [key: string]: unknown;
+  };
   created_at: string;
 }
 

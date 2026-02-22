@@ -22,6 +22,8 @@ class Session(models.Model):
     )
     kind = models.CharField(max_length=20, choices=SESSION_KIND_CHOICES)
     title = models.CharField(max_length=255, blank=True, default='')
+    # 이미지 세션 전용: 참고용 이미지 URL 1~2개 (세션 기준으로 저장, 이후 생성 요청마다 사용)
+    reference_image_urls = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

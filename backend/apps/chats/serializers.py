@@ -41,7 +41,7 @@ class DocumentSerializer(serializers.ModelSerializer):
 class ImageRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImageRecord
-        fields = ('id', 'prompt', 'image_url', 'model', 'created_at')
+        fields = ('id', 'prompt', 'image_url', 'model', 'metadata', 'created_at')
 
 
 class SessionListSerializer(serializers.ModelSerializer):
@@ -53,7 +53,7 @@ class SessionListSerializer(serializers.ModelSerializer):
 class SessionDetailSerializer(serializers.ModelSerializer):
     messages = MessageSerializer(many=True, read_only=True)
     image_records = ImageRecordSerializer(many=True, read_only=True)
-
     class Meta:
         model = Session
-        fields = ('id', 'kind', 'title', 'created_at', 'updated_at', 'messages', 'image_records')
+        fields = ('id', 'kind', 'title', 'created_at', 'updated_at', 'messages', 'image_records', 'reference_image_urls')
+        # reference_image_urls: Session.reference_image_urls (JSONField list, 0~2 URLs)

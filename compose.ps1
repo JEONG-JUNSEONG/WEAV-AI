@@ -39,10 +39,10 @@ switch ($cmd) {
     "up"    { Invoke-DockerCompose -DockerArgs @("up", "-d") }
     "down"  { Invoke-DockerCompose -DockerArgs @("down") }
     "build" { Invoke-DockerCompose -DockerArgs @("build") }
-    "test"  { Invoke-DockerCompose -DockerArgs @("run", "--rm", "api", "python", "manage.py", "test", "tests") }
-    "migrate" { Invoke-DockerCompose -DockerArgs @("run", "--rm", "api", "python", "manage.py", "migrate") }
+    "test"  { Invoke-DockerCompose -DockerArgs @("run", "--rm", "--entrypoint", "python", "api", "manage.py", "test", "tests") }
+    "migrate" { Invoke-DockerCompose -DockerArgs @("run", "--rm", "--entrypoint", "python", "api", "manage.py", "migrate") }
     "logs"  { Invoke-DockerCompose -DockerArgs @("logs", "-f", "api") }
-    "shell" { Invoke-DockerCompose -DockerArgs @("run", "--rm", "api", "sh") }
+    "shell" { Invoke-DockerCompose -DockerArgs @("run", "--rm", "--entrypoint", "sh", "api") }
     "help"  { Show-Help }
     default {
         Write-Host "알 수 없는 명령: $Command" -ForegroundColor Yellow

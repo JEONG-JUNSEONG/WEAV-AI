@@ -68,6 +68,7 @@ export const chatApi = {
       numImages?: number;
       referenceImageId?: number;
       referenceImageUrl?: string;
+      referenceImageUrls?: string[];
       imageUrls?: string[];
       resolution?: string;
       outputFormat?: string;
@@ -82,6 +83,7 @@ export const chatApi = {
       num_images: options?.numImages ?? 1,
       ...(options?.referenceImageId != null && { reference_image_id: options.referenceImageId }),
       ...(options?.referenceImageUrl != null && options.referenceImageUrl !== '' && { reference_image_url: options.referenceImageUrl }),
+      ...(options?.referenceImageUrls != null && options.referenceImageUrls.length > 0 && { reference_image_urls: options.referenceImageUrls }),
       ...(options?.imageUrls != null && options.imageUrls.length > 0 && { image_urls: options.imageUrls }),
       ...(options?.resolution != null && options.resolution !== '' && { resolution: options.resolution }),
       ...(options?.outputFormat != null && options.outputFormat !== '' && { output_format: options.outputFormat }),
@@ -95,10 +97,12 @@ export const chatApi = {
     }),
   regenerateImage: (
     sessionId: number,
-    options?: { aspectRatio?: string; resolution?: string; outputFormat?: string; seed?: number }
+    options?: { prompt?: string; model?: string; aspectRatio?: string; resolution?: string; outputFormat?: string; seed?: number }
   ) =>
     api.post<{ task_id: string; job_id: number }>('/api/v1/chat/image/regenerate/', {
       session_id: sessionId,
+      ...(options?.prompt != null && options.prompt !== '' && { prompt: options.prompt }),
+      ...(options?.model != null && options.model !== '' && { model: options.model }),
       ...(options?.aspectRatio != null && { aspect_ratio: options.aspectRatio }),
       ...(options?.resolution != null && options.resolution !== '' && { resolution: options.resolution }),
       ...(options?.outputFormat != null && options.outputFormat !== '' && { output_format: options.outputFormat }),

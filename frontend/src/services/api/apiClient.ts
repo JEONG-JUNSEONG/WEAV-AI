@@ -7,8 +7,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...options.headers },
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText, error: res.statusText }));
-    const msg = (err as { detail?: string; error?: string }).detail ?? (err as { error?: string }).error ?? res.statusText;
+    const text = await res.text();
+    let msg = res.statusText;
+    try {
+      const err = text ? JSON.parse(text) : {};
+      msg = (err as { detail?: string }).detail ?? (err as { error?: string }).error ?? msg;
+    } catch {
+      if (res.status >= 500) msg = '서버 오류. 터미널에서 make migrate 후 재시도하세요.';
+    }
     throw new Error(msg);
   }
   if (res.status === 204) {

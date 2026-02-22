@@ -48,11 +48,18 @@ type AttachmentItem = {
   status: 'uploading' | 'ready' | 'error';
 };
 
+type PendingImageRequestState = {
+  sessionId: number;
+  prompt: string;
+  referenceImageUrls: string[];
+  attachmentImageUrls: string[];
+} | null;
+
 type ChatContextValue = {
   sending: boolean;
   error: string | null;
   sendChatMessage: (prompt: string, model: string) => Promise<void>;
-  sendImageRequest: (prompt: string, model: string, options?: { referenceImageId?: number; referenceImageUrl?: string } & Partial<ImageGenOptions>) => Promise<void>;
+  sendImageRequest: (prompt: string, model: string, options?: { referenceImageId?: number; referenceImageUrl?: string } & Partial<ImageGenOptions>) => Promise<boolean>;
   stopGeneration: () => void;
   regenerateChat: (sessionId: number, options?: RegenerateChatOptions) => Promise<void>;
   regenerateImage: (sessionId: number, options?: { prompt?: string } & Partial<ImageGenOptions>) => Promise<void>;
@@ -60,6 +67,9 @@ type ChatContextValue = {
   setChatModel: (sessionId: number, model: string) => void;
   getImageModel: (sessionId: number) => string;
   setImageModel: (sessionId: number, model: string) => void;
+  /** 채팅 세션에서 입력 모드: 텍스트 대화 vs 이미지 생성 (통일 채팅방용) */
+  getChatInputMode: (sessionId: number) => 'text' | 'image';
+  setChatInputMode: (sessionId: number, mode: 'text' | 'image') => void;
   /** 연필 클릭 시 하단 입력창에 넣을 내용 (재질문 모드) */
   regeneratePrompt: RegeneratePromptState;
   setRegeneratePrompt: (sessionId: number, prompt: string) => void;
@@ -69,7 +79,7 @@ type ChatContextValue = {
   setRegenerateImagePrompt: (sessionId: number, prompt: string) => void;
   clearRegenerateImagePrompt: () => void;
   /** 이미지 생성 중인 질문 (질문 먼저 띄우기용) */
-  pendingImageRequest: { sessionId: number; prompt: string } | null;
+  pendingImageRequest: PendingImageRequestState;
   /** 이미지 세션별 참조 이미지 ID (세션 내 생성 이미지 선택) */
   getReferenceImageId: (sessionId: number) => number | null;
   setReferenceImageId: (sessionId: number, imageRecordId: number | null) => void;
@@ -101,11 +111,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [modelBySession, setModelBySession] = useState<SessionModels>(loadModelsFromStorage);
   const [regeneratePrompt, setRegeneratePromptState] = useState<RegeneratePromptState>(null);
   const [regenerateImagePrompt, setRegenerateImagePromptState] = useState<RegeneratePromptState>(null);
-  const [pendingImageRequest, setPendingImageRequest] = useState<{ sessionId: number; prompt: string } | null>(null);
+  const [pendingImageRequest, setPendingImageRequest] = useState<PendingImageRequestState>(null);
   const [referenceImageIdBySession, setReferenceImageIdBySession] = useState<Record<number, number | null>>({});
   const [referenceImageUrlBySession, setReferenceImageUrlBySession] = useState<Record<number, string | null>>({});
   const [attachmentItemsBySession, setAttachmentItemsBySession] = useState<Record<number, AttachmentItem[]>>({});
   const [imageSettingsBySession, setImageSettingsBySession] = useState<Record<number, Partial<ImageGenOptions>>>({});
+  const [chatInputModeBySession, setChatInputModeBySession] = useState<Record<number, 'text' | 'image'>>({});
   const [documentsBySession, setDocumentsBySession] = useState<Record<number, DocumentItem[]>>({});
   const modelBySessionRef = useRef<SessionModels>({});
   modelBySessionRef.current = modelBySession;
@@ -144,6 +155,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       [sessionId]: { ...getStoredModels(prev, sessionId), image: model },
     }));
+  }, []);
+  const getChatInputMode = useCallback((sessionId: number) => chatInputModeBySession[sessionId] ?? 'text', [chatInputModeBySession]);
+  const setChatInputMode = useCallback((sessionId: number, mode: 'text' | 'image') => {
+    setChatInputModeBySession((prev) => ({ ...prev, [sessionId]: mode }));
   }, []);
   const getReferenceImageId = useCallback((sessionId: number) => referenceImageIdBySession[sessionId] ?? null, [referenceImageIdBySession]);
   const setReferenceImageId = useCallback((sessionId: number, imageRecordId: number | null) => {
@@ -286,19 +301,33 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       model: string,
       options?: { referenceImageId?: number; referenceImageUrl?: string; imageUrls?: string[] } & Partial<ImageGenOptions>
     ) => {
-      if (!currentSession || currentSession.kind !== 'image') return;
+      if (!currentSession) return false;
+      const isImageSession = currentSession.kind === 'image';
+      const isChatWithImageMode = currentSession.kind === 'chat' && getChatInputMode(currentSession.id) === 'image';
+      if (!isImageSession && !isChatWithImageMode) return false;
       const sessionId = currentSession.id;
+      let succeeded = false;
       abortRef.current = false;
       setSending(true);
       setError(null);
-      setPendingImageRequest({ sessionId, prompt });
-      const refUrl = options?.referenceImageUrl ?? referenceImageUrlBySession[sessionId] ?? null;
+      // 세션 참고 이미지가 있으면 백엔드가 사용하므로 요청에 참조를 넣지 않음
+      const useSessionRefs = (currentSession.reference_image_urls?.length ?? 0) > 0;
+      const refUrl = useSessionRefs ? null : (options?.referenceImageUrl ?? referenceImageUrlBySession[sessionId] ?? null);
       const refId = refUrl == null ? (options?.referenceImageId ?? referenceImageIdBySession[sessionId] ?? null) : null;
       const attachmentUrls =
         options?.imageUrls ??
         getAttachmentItems(sessionId)
           .map((item) => item.remoteUrl)
           .filter((u): u is string => Boolean(u));
+      const referenceImageUrls = useSessionRefs
+        ? (currentSession.reference_image_urls ?? []).filter((u): u is string => Boolean(u)).slice(0, 2)
+        : (refUrl ? [refUrl] : []);
+      setPendingImageRequest({
+        sessionId,
+        prompt,
+        referenceImageUrls,
+        attachmentImageUrls: attachmentUrls,
+      });
       const settings = getImageSettings(sessionId, model);
       const merged = { ...settings, ...options };
       try {
@@ -307,6 +336,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           numImages: merged.num_images,
           ...(refUrl != null && refUrl !== '' && { referenceImageUrl: refUrl }),
           ...(refId != null && { referenceImageId: refId }),
+          ...(useSessionRefs && (currentSession.reference_image_urls?.length ?? 0) > 0 && { referenceImageUrls: currentSession.reference_image_urls }),
           ...(attachmentUrls.length > 0 && { imageUrls: attachmentUrls }),
           resolution: merged.resolution,
           outputFormat: merged.output_format,
@@ -315,6 +345,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         currentTaskIdRef.current = res.task_id;
         await refreshSession(sessionId);
         await pollJob(res.task_id, sessionId);
+        succeeded = true;
       } catch (e) {
         currentTaskIdRef.current = null;
         setError(e instanceof Error ? e.message : '생성 실패');
@@ -322,8 +353,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setPendingImageRequest(null);
         setSending(false);
       }
+      return succeeded;
     },
-    [currentSession, getImageSettings, getAttachmentItems, pollJob, refreshSession, referenceImageIdBySession, referenceImageUrlBySession]
+    [currentSession, getChatInputMode, getImageSettings, getAttachmentItems, pollJob, refreshSession, referenceImageIdBySession, referenceImageUrlBySession]
   );
 
   const regenerateChat = useCallback(
@@ -351,9 +383,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const regenerateImage = useCallback(
     async (sessionId: number, options?: { prompt?: string } & Partial<ImageGenOptions>) => {
-      if (!currentSession || currentSession.kind !== 'image' || currentSession.id !== sessionId) return;
+      if (!currentSession || currentSession.id !== sessionId) return;
+      const isImageSession = currentSession.kind === 'image';
+      const isChatWithImageMode = currentSession.kind === 'chat' && getChatInputMode(sessionId) === 'image';
+      if (!isImageSession && !isChatWithImageMode) return;
       const prompt = options?.prompt;
-      if (prompt != null) setPendingImageRequest({ sessionId, prompt });
+      if (prompt != null) {
+        setPendingImageRequest({
+          sessionId,
+          prompt,
+          referenceImageUrls: [],
+          attachmentImageUrls: [],
+        });
+      }
       const imageModel = getImageModel(sessionId);
       const settings = getImageSettings(sessionId, imageModel);
       const merged = { ...settings, ...options };
@@ -362,6 +404,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       try {
         const res = await chatApi.regenerateImage(sessionId, {
+          prompt: prompt?.trim() || undefined,
+          model: imageModel,
           aspectRatio: merged.aspect_ratio,
           resolution: merged.resolution,
           outputFormat: merged.output_format,
@@ -378,7 +422,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setSending(false);
       }
     },
-    [currentSession, getImageModel, getImageSettings, pollJob, refreshSession]
+    [currentSession, getChatInputMode, getImageModel, getImageSettings, pollJob, refreshSession]
   );
 
   const value: ChatContextValue = {
@@ -393,6 +437,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setChatModel,
     getImageModel,
     setImageModel,
+    getChatInputMode,
+    setChatInputMode,
     regeneratePrompt,
     setRegeneratePrompt,
     clearRegeneratePrompt,

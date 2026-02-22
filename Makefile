@@ -23,13 +23,13 @@ build:
 	cd infra && docker compose build
 
 test:
-	cd infra && docker compose run --rm api python manage.py test tests
+	cd infra && docker compose run --rm --entrypoint python api manage.py test tests
 
 migrate:
-	cd infra && docker compose run --rm api python manage.py migrate
+	cd infra && docker compose run --rm --entrypoint python api manage.py migrate
 
 logs:
 	cd infra && docker compose logs -f api
 
 shell:
-	cd infra && docker compose run --rm api sh
+	cd infra && docker compose run --rm --entrypoint sh api

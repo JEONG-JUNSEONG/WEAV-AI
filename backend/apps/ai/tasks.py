@@ -21,6 +21,14 @@ DOC_MENTION_RE = re.compile(r'@([^\s]+)')
 DOC_MENTION_QUOTED_RE = re.compile(r'@"([^"]+)"')
 DOC_MENTION_QUOTED_SINGLE_RE = re.compile(r"@'([^']+)'")
 
+def _clip_text(text: str, max_len: int = 280) -> str:
+    if not text:
+        return ""
+    s = str(text).strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
+
 
 def _fallback_extract_doc_name(prompt: str) -> Optional[str]:
     if not prompt:
@@ -213,6 +221,7 @@ def task_image(
     seed: int = None,
     reference_image_id: int = None,
     reference_image_url: str = None,
+    reference_image_urls: list = None,
     image_urls: list[str] = None,
     mask_url: str = None,
     resolution: str = None,
@@ -224,35 +233,61 @@ def task_image(
 
     ref_url = reference_image_url
     ref_image = None
-    if ref_url is None and reference_image_id:
-        try:
-            ref_image = ImageRecord.objects.get(pk=reference_image_id)
-            ref_url = ref_image.image_url
-        except ImageRecord.DoesNotExist:
-            pass
+    session_ref_list = [u for u in (reference_image_urls or []) if u][:2]
 
-    attachments = [u for u in (image_urls or []) if u]
-    has_reference = ref_url is not None
-    has_attachments = len(attachments) > 0
+    if session_ref_list:
+        # 세션 참고 이미지(1~2개)만 사용: 요청 첨부는 참조로 섞지 않음
+        has_reference = True
+        has_attachments = False
+        attachments = []
+        if len(session_ref_list) == 1:
+            ref_url = session_ref_list[0]
+            edit_image_urls = None  # 단일은 ref_url로 전달
+        else:
+            ref_url = None
+            edit_image_urls = session_ref_list[:2]
+    else:
+        if ref_url is None and reference_image_id:
+            try:
+                ref_image = ImageRecord.objects.get(pk=reference_image_id)
+                ref_url = ref_image.image_url
+            except ImageRecord.DoesNotExist:
+                pass
+        attachments = [u for u in (image_urls or []) if u]
+        has_reference = ref_url is not None
+        has_attachments = len(attachments) > 0
+        edit_image_urls = None
 
     effective_model = model
-    edit_image_urls = None
-    if model == IMAGE_MODEL_NANO_BANANA:
+    if model == IMAGE_MODEL_NANO_BANANA and not session_ref_list:
         if has_reference or has_attachments:
             effective_model = IMAGE_MODEL_NANO_BANANA_EDIT
             edit_image_urls = []
             if has_reference:
                 edit_image_urls.append(ref_url)
             edit_image_urls.extend(attachments)
-            # Safety clamp: nano-banana edit supports up to 2 images
             edit_image_urls = edit_image_urls[:2]
         else:
-            # TTI 유지: Gemini 3 Pro Image Preview 사용
             effective_model = IMAGE_MODEL_GEMINI3_PRO_IMAGE
+    elif model == IMAGE_MODEL_NANO_BANANA and session_ref_list:
+        effective_model = IMAGE_MODEL_NANO_BANANA_EDIT
+        if edit_image_urls is None:
+            edit_image_urls = [ref_url] if ref_url else session_ref_list[:2]
+
+    # 사용자 입력으로 들어온 참조/첨부 이미지를 타임라인에 다시 보여주기 위한 메타데이터
+    # (모델별 내부 fallback로 변형되기 전의 원본 입력 기준)
+    input_reference_urls = session_ref_list[:2] if session_ref_list else ([ref_url] if ref_url else [])
+    input_attachment_urls = [u for u in attachments if u]
+    input_image_urls = []
+    for u in [*input_reference_urls, *input_attachment_urls]:
+        if u and u not in input_image_urls:
+            input_image_urls.append(u)
 
     if effective_model == IMAGE_MODEL_KLING:
         if not has_reference and attachments:
             ref_url = attachments[0]
+        elif session_ref_list and ref_url is None and edit_image_urls:
+            ref_url = edit_image_urls[0]
 
     try:
         rag_context = get_rag_context_string(job.session.id, prompt)
@@ -286,10 +321,39 @@ def task_image(
                         seed=img_seed or seed,
                         mask_url=mask_url,
                         reference_image=ref_image,
-                        metadata={'aspect_ratio': aspect_ratio}
+                        metadata={
+                            'aspect_ratio': aspect_ratio,
+                            'resolution': resolution,
+                            'output_format': output_format,
+                            'num_images': num_images,
+                            'requested_model': model,
+                            'effective_model': effective_model,
+                            'input_reference_urls': input_reference_urls,
+                            'input_attachment_urls': input_attachment_urls,
+                            'input_image_urls': input_image_urls,
+                        }
                     )
                     job.image_record = rec
-                    break # Only link one for now
+                    break  # Only link one for now
+
+            if job.image_record is None:
+                raise AIError('No image URL in response (malformed fal response)')
+
+            # Leave a lightweight assistant message so follow-up text chat can reference
+            # the image generation context (single chat-room UX).
+            rec = job.image_record
+            summary = "\n".join(
+                line
+                for line in [
+                    f"이미지 생성 완료 (ID: {rec.id})",
+                    f"- 모델: {effective_model}",
+                    (f"- seed: {rec.seed}" if rec.seed is not None else ""),
+                    f"- 프롬프트: {_clip_text(prompt, 240)}",
+                    f"- 이미지 URL: {rec.image_url}",
+                ]
+                if line
+            )
+            Message.objects.create(session=job.session, role='assistant', content=summary, citations=[])
 
             job.status = 'success'
             job.error_message = ''

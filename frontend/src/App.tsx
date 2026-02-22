@@ -34,7 +34,11 @@ function AppContentInner() {
 
   return (
     <LayoutProvider sidebarOpen={sidebarOpen}>
-      <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <div className="relative min-h-screen bg-background text-foreground flex flex-col overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 -z-10">
+          <div className="absolute inset-0 bg-[radial-gradient(1200px_620px_at_18%_-8%,rgba(132,114,190,0.2),transparent_62%),radial-gradient(980px_540px_at_84%_0%,rgba(101,112,166,0.16),transparent_60%),linear-gradient(180deg,#0d1017_0%,#0b0f16_56%,#090d13_100%)]" />
+          <div className="absolute inset-0 opacity-[0.04] [background-image:linear-gradient(rgba(158,166,196,0.34)_1px,transparent_1px),linear-gradient(90deg,rgba(158,166,196,0.28)_1px,transparent_1px)] [background-size:34px_34px]" />
+        </div>
         <AppHeader
           ref={menuButtonRef}
           sidebarOpen={sidebarOpen}
@@ -43,7 +47,7 @@ function AppContentInner() {
         <Sidebar open={sidebarOpen} onStudioClick={() => setShowStudioDialog(true)} />
         <main
           ref={mainRef}
-          className={`flex-1 flex flex-col min-w-0 min-h-0 transition-[margin] duration-300 ease-out ${
+          className={`flex-1 flex flex-col min-w-0 min-h-0 pt-14 transition-[margin] duration-300 ease-out ${
             sidebarOpen ? 'ml-72' : 'ml-0'
           }`}
         >
