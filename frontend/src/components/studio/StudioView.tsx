@@ -2171,14 +2171,14 @@ const VideoStep = ({ showToast }: { showToast: (msg: string) => void }) => {
               <div className="flex gap-6">
                 {/* 왼쪽: 얇은 세로 비율 막대, 씬별로 갭으로 구분 */}
                 <div
-                  className="flex flex-col gap-1 flex-shrink-0 rounded-lg p-1 border border-slate-200 bg-slate-100"
+                  className="flex flex-col gap-1 flex-shrink-0 rounded-lg p-1 border border-border/70 bg-secondary/55"
                   style={{ minHeight: '12rem', width: '0.875rem' }}
                   title={`전체 ${formatTime(totalDuration)}`}
                 >
                   {timeline.map((clip, idx) => (
                     <div
                       key={clip.id}
-                      className={`w-full rounded-md flex-shrink-0 transition-all duration-200 ${hoveredClipIndex === idx ? 'ring-2 ring-slate-900 ring-offset-1 ring-offset-slate-100 opacity-100 scale-105' : 'hover:opacity-90'}`}
+                      className={`w-full rounded-md flex-shrink-0 transition-all duration-200 ${hoveredClipIndex === idx ? 'ring-2 ring-primary ring-offset-1 ring-offset-background opacity-100 scale-105' : 'hover:opacity-90'}`}
                       style={{
                         flex: totalDuration > 0 ? clip.duration / totalDuration : 0,
                         minHeight: 10,
@@ -2195,25 +2195,25 @@ const VideoStep = ({ showToast }: { showToast: (msg: string) => void }) => {
                       key={clip.id}
                       onMouseEnter={() => setHoveredClipIndex(idx)}
                       onMouseLeave={() => setHoveredClipIndex(null)}
-                      className="flex gap-5 rounded-2xl border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm transition-all"
+                      className="flex gap-5 rounded-2xl border border-border/70 bg-card p-4 hover:border-border hover:shadow-sm transition-all"
                     >
-                      <div className="w-36 flex-shrink-0 aspect-video rounded-xl overflow-hidden bg-slate-100">
+                      <div className="w-36 flex-shrink-0 aspect-video rounded-xl overflow-hidden bg-secondary/55">
                         {clip.thumb ? (
                           <img src={clip.thumb} alt={clip.label} className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            <Film size={28} className="text-slate-400" />
+                            <Film size={28} className="text-muted-foreground" />
                           </div>
                         )}
                       </div>
                       <div className="flex-1 min-w-0 flex flex-col justify-center gap-2">
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-base font-semibold text-slate-900">{clip.label}</span>
-                          <span className="text-sm font-semibold text-slate-700 tabular-nums">{clip.duration.toFixed(1)}초</span>
+                          <span className="text-base font-semibold text-foreground">{clip.label}</span>
+                          <span className="text-sm font-semibold text-muted-foreground tabular-nums">{clip.duration.toFixed(1)}초</span>
                         </div>
-                        <p className="text-sm text-slate-600 tabular-nums">
+                        <p className="text-sm text-muted-foreground tabular-nums">
                           <span className="font-medium">{formatTime(clip.startTime)}</span>
-                          <span className="text-slate-400 mx-1.5">→</span>
+                          <span className="text-muted-foreground/70 mx-1.5">→</span>
                           <span className="font-medium">{formatTime(clip.startTime + clip.duration)}</span>
                         </p>
                         {(!clip.thumb || !clip.audioUrl) && (
@@ -2226,7 +2226,7 @@ const VideoStep = ({ showToast }: { showToast: (msg: string) => void }) => {
               </div>
             )}
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-600 leading-relaxed">
+          <div className="rounded-2xl border border-border/70 bg-secondary/45 px-4 py-3 text-sm text-muted-foreground leading-relaxed">
             위 타임라인은 각 씬의 시작·종료 시간과 비율을 보여줍니다. 영상 생성 버튼을 누르면 서버에서 이미지와 음성을 합쳐 최종 영상으로 렌더링합니다.
           </div>
         </div>
