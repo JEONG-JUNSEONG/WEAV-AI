@@ -55,9 +55,26 @@ function loadStoredStudio(storageKey: string): Record<string, unknown> | null {
   const [referenceImageUrl, setReferenceImageUrl] = useState(() => (typeof stored?.referenceImageUrl === 'string') ? stored.referenceImageUrl : '');
   const [analyzedStylePrompt, setAnalyzedStylePrompt] = useState(() => (typeof stored?.analyzedStylePrompt === 'string') ? stored.analyzedStylePrompt : '');
   const [analyzedStylePromptKo, setAnalyzedStylePromptKo] = useState(() => (typeof stored?.analyzedStylePromptKo === 'string') ? stored.analyzedStylePromptKo : '');
-  const [selectedVoicePresetId, setSelectedVoicePresetId] = useState(() => (typeof stored?.selectedVoicePresetId === 'string') ? stored.selectedVoicePresetId : 'ko-female-1');
-  const [subtitlesEnabled, setSubtitlesEnabled] = useState(() => (typeof stored?.subtitlesEnabled === 'boolean') ? stored.subtitlesEnabled : true);
-  const [burnInSubtitles, setBurnInSubtitles] = useState(() => (typeof stored?.burnInSubtitles === 'boolean') ? stored.burnInSubtitles : false);
+	  const [selectedVoicePresetId, setSelectedVoicePresetId] = useState(() => (typeof stored?.selectedVoicePresetId === 'string') ? stored.selectedVoicePresetId : 'ko-female-1');
+	  const [subtitlesEnabled, setSubtitlesEnabled] = useState(() => (typeof stored?.subtitlesEnabled === 'boolean') ? stored.subtitlesEnabled : true);
+	  const [burnInSubtitles, setBurnInSubtitles] = useState(() => (typeof stored?.burnInSubtitles === 'boolean') ? stored.burnInSubtitles : false);
+	  const [videoUrl, setVideoUrl] = useState<string | null>(() => (typeof stored?.videoUrl === 'string' && stored.videoUrl) ? stored.videoUrl : null);
+	  const [metaTitle, setMetaTitle] = useState(() => (typeof stored?.metaTitle === 'string') ? stored.metaTitle : '');
+	  const [metaDescription, setMetaDescription] = useState(() => (typeof stored?.metaDescription === 'string') ? stored.metaDescription : '');
+	  const [metaPinnedComment, setMetaPinnedComment] = useState(() => (typeof stored?.metaPinnedComment === 'string') ? stored.metaPinnedComment : '');
+	  const [thumbnailData, setThumbnailData] = useState(() => {
+	    const def = { thumbnails: [] as any[], ytUrlInput: '', ytThumbnailUrl: null as string | null };
+	    if (stored?.thumbnailData && typeof stored.thumbnailData === 'object' && !Array.isArray(stored.thumbnailData)) {
+	      const t = stored.thumbnailData as Record<string, unknown>;
+	      const thumbs = Array.isArray(t.thumbnails) ? (t.thumbnails as any[]) : def.thumbnails;
+	      return {
+	        thumbnails: thumbs,
+	        ytUrlInput: typeof t.ytUrlInput === 'string' ? (t.ytUrlInput as string) : def.ytUrlInput,
+	        ytThumbnailUrl: typeof t.ytThumbnailUrl === 'string' ? (t.ytThumbnailUrl as string) : def.ytThumbnailUrl,
+	      };
+	    }
+	    return def;
+	  });
 
   const [analysisResult, setAnalysisResult] = useState<StudioAnalysisResult>({
     niche: [],
@@ -68,16 +85,18 @@ function loadStoredStudio(storageKey: string): Record<string, unknown> | null {
     isUrlAnalyzing: false
   });
 
-  const [scenes, setScenes] = useState<StudioScene[]>(() => Array.isArray(stored?.scenes) && stored.scenes.length > 0 ? stored.scenes as StudioScene[] : []);
-  const [scriptSegments, setScriptSegments] = useState<StudioScriptSegment[]>([]);
-  const [generatedTopics, setGeneratedTopics] = useState<string[]>(() => Array.isArray(stored?.generatedTopics) ? stored.generatedTopics : []);
-  const [selectedTopic, setSelectedTopic] = useState(() => (typeof stored?.selectedTopic === 'string') ? stored.selectedTopic : '');
-  const [finalTopic, setFinalTopic] = useState(() => (typeof stored?.finalTopic === 'string') ? stored.finalTopic : '');
-  const [referenceScript, setReferenceScript] = useState('');
-  const [scriptStyle, setScriptStyle] = useState(() => (typeof stored?.scriptStyle === 'string') ? stored.scriptStyle : 'type-a');
-  const [scriptLength, setScriptLength] = useState(() => (typeof stored?.scriptLength === 'string') ? stored.scriptLength : 'short');
-  const [masterPlan, setMasterPlan] = useState(() => (typeof stored?.masterPlan === 'string') ? stored.masterPlan : '');
-  const [planningData, setPlanningData] = useState<StudioScriptPlanningData>(() => {
+	  const [scenes, setScenes] = useState<StudioScene[]>(() => Array.isArray(stored?.scenes) && stored.scenes.length > 0 ? stored.scenes as StudioScene[] : []);
+	  const [sceneDurations, setSceneDurations] = useState<number[]>(() => Array.isArray(stored?.sceneDurations) ? (stored.sceneDurations as number[]) : []);
+	  const [scriptSegments, setScriptSegments] = useState<StudioScriptSegment[]>([]);
+	  const [generatedTopics, setGeneratedTopics] = useState<string[]>(() => Array.isArray(stored?.generatedTopics) ? stored.generatedTopics : []);
+	  const [selectedTopic, setSelectedTopic] = useState(() => (typeof stored?.selectedTopic === 'string') ? stored.selectedTopic : '');
+	  const [finalTopic, setFinalTopic] = useState(() => (typeof stored?.finalTopic === 'string') ? stored.finalTopic : '');
+	  const [referenceScript, setReferenceScript] = useState('');
+	  const [scriptStyle, setScriptStyle] = useState(() => (typeof stored?.scriptStyle === 'string') ? stored.scriptStyle : 'type-a');
+	  const [customScriptStyleText, setCustomScriptStyleText] = useState(() => (typeof stored?.customScriptStyleText === 'string') ? stored.customScriptStyleText : '');
+	  const [scriptLength, setScriptLength] = useState(() => (typeof stored?.scriptLength === 'string') ? stored.scriptLength : 'short');
+	  const [masterPlan, setMasterPlan] = useState(() => (typeof stored?.masterPlan === 'string') ? stored.masterPlan : '');
+	  const [planningData, setPlanningData] = useState<StudioScriptPlanningData>(() => {
     const def = { contentType: '', summary: '', opening: '', body: '', climax: '', outro: '', targetDuration: '1m' as string };
     if (stored?.planningData && typeof stored.planningData === 'object' && !Array.isArray(stored.planningData)) {
       const p = stored.planningData as Record<string, unknown>;
@@ -94,25 +113,27 @@ function loadStoredStudio(storageKey: string): Record<string, unknown> | null {
     return def;
   });
 
-  useEffect(() => {
-    const data = {
-      currentStep, activeTags, urlInput, urlAnalysisData, videoFormat, inputMode,
-      descriptionInput, scenes, scriptStyle, scriptLength, planningData,
-      selectedTopic, finalTopic, generatedTopics, masterPlan, masterScript, selectedStyle,
-      referenceImage, referenceImageUrl, analyzedStylePrompt, analyzedStylePromptKo,
-      selectedBenchmarkPatterns,
-      selectedVoicePresetId, subtitlesEnabled, burnInSubtitles
-    };
-    localStorage.setItem(storageKey, JSON.stringify(data));
-  }, [
-    storageKey,
-    currentStep, activeTags, urlInput, urlAnalysisData, videoFormat, inputMode,
-    descriptionInput, scenes, scriptStyle, scriptLength, planningData,
-    selectedTopic, finalTopic, generatedTopics, masterPlan, masterScript, selectedStyle,
-    referenceImage, referenceImageUrl, analyzedStylePrompt, analyzedStylePromptKo,
-    selectedBenchmarkPatterns,
-    selectedVoicePresetId, subtitlesEnabled, burnInSubtitles
-  ]);
+	  useEffect(() => {
+	    const data = {
+	      currentStep, activeTags, urlInput, urlAnalysisData, videoFormat, inputMode,
+	      descriptionInput, scenes, sceneDurations, scriptStyle, customScriptStyleText, scriptLength, planningData,
+	      selectedTopic, finalTopic, generatedTopics, masterPlan, masterScript, selectedStyle,
+	      referenceImage, referenceImageUrl, analyzedStylePrompt, analyzedStylePromptKo,
+	      selectedBenchmarkPatterns,
+	      selectedVoicePresetId, subtitlesEnabled, burnInSubtitles,
+	      videoUrl, metaTitle, metaDescription, metaPinnedComment, thumbnailData
+	    };
+	    localStorage.setItem(storageKey, JSON.stringify(data));
+	  }, [
+	    storageKey,
+	    currentStep, activeTags, urlInput, urlAnalysisData, videoFormat, inputMode,
+	    descriptionInput, scenes, sceneDurations, scriptStyle, customScriptStyleText, scriptLength, planningData,
+	    selectedTopic, finalTopic, generatedTopics, masterPlan, masterScript, selectedStyle,
+	    referenceImage, referenceImageUrl, analyzedStylePrompt, analyzedStylePromptKo,
+	    selectedBenchmarkPatterns,
+	    selectedVoicePresetId, subtitlesEnabled, burnInSubtitles,
+	    videoUrl, metaTitle, metaDescription, metaPinnedComment, thumbnailData
+	  ]);
 
   const value = {
     sessionId,
@@ -125,29 +146,36 @@ function loadStoredStudio(storageKey: string): Record<string, unknown> | null {
     isDevMode, setIsDevMode,
     videoFormat, setVideoFormat,
     analysisResult, setAnalysisResult,
-    inputMode, setInputMode,
-    descriptionInput, setDescriptionInput,
-    scenes, setScenes,
-    scriptSegments, setScriptSegments,
-    generatedTopics, setGeneratedTopics,
-    selectedTopic, setSelectedTopic,
-    finalTopic, setFinalTopic,
-    referenceScript, setReferenceScript,
-    scriptStyle, setScriptStyle,
-    scriptLength, setScriptLength,
-    planningData, setPlanningData,
-    masterPlan, setMasterPlan,
+	    inputMode, setInputMode,
+	    descriptionInput, setDescriptionInput,
+	    scenes, setScenes,
+	    sceneDurations, setSceneDurations,
+	    scriptSegments, setScriptSegments,
+	    generatedTopics, setGeneratedTopics,
+	    selectedTopic, setSelectedTopic,
+	    finalTopic, setFinalTopic,
+	    referenceScript, setReferenceScript,
+	    scriptStyle, setScriptStyle,
+	    customScriptStyleText, setCustomScriptStyleText,
+	    scriptLength, setScriptLength,
+	    planningData, setPlanningData,
+	    masterPlan, setMasterPlan,
     isFileLoaded, setIsFileLoaded,
     masterScript, setMasterScript,
     selectedStyle, setSelectedStyle,
     referenceImage, setReferenceImage,
     referenceImageUrl, setReferenceImageUrl,
     analyzedStylePrompt, setAnalyzedStylePrompt,
-    analyzedStylePromptKo, setAnalyzedStylePromptKo,
-    selectedVoicePresetId, setSelectedVoicePresetId,
-    subtitlesEnabled, setSubtitlesEnabled,
-    burnInSubtitles, setBurnInSubtitles
-  };
+	    analyzedStylePromptKo, setAnalyzedStylePromptKo,
+	    selectedVoicePresetId, setSelectedVoicePresetId,
+	    subtitlesEnabled, setSubtitlesEnabled,
+	    burnInSubtitles, setBurnInSubtitles,
+	    videoUrl, setVideoUrl,
+	    metaTitle, setMetaTitle,
+	    metaDescription, setMetaDescription,
+	    metaPinnedComment, setMetaPinnedComment,
+	    thumbnailData, setThumbnailData
+	  };
 
   return <GlobalContext.Provider value={value}>{children}</GlobalContext.Provider>;
 };
@@ -1732,7 +1760,7 @@ function getYoutubeThumbnailUrl(videoId: string): string {
 
 // --- [Step 5: AI 음성 합성] ---
 const VoiceStep = () => {
-  const { scenes, setScenes, selectedVoicePresetId, setSelectedVoicePresetId } = useGlobal();
+  const { scenes, setScenes, setSceneDurations, selectedVoicePresetId, setSelectedVoicePresetId } = useGlobal();
   const [segments, setSegments] = useState<VoiceSegment[]>([]);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [samplePlaying, setSamplePlaying] = useState(false);
@@ -1741,14 +1769,14 @@ const VoiceStep = () => {
 
   useEffect(() => {
     if (scenes.length > 0)
-      setSegments(scenes.map((s, i) => ({
-        id: s.id,
-        sceneIndex: i + 1,
-        text: s.narrative || '(대사 없음)',
-        durationSec: s.audioDurationSec || 0,
-        status: s.audioUrl ? 'done' : 'pending',
-        audioUrl: s.audioUrl,
-      })));
+        setSegments(scenes.map((s, i) => ({
+          id: s.id,
+          sceneIndex: i + 1,
+          text: s.narrative || '(대사 없음)',
+          durationSec: (s.durationSec ?? s.audioDurationSec ?? 0) || 0,
+          status: s.audioUrl ? 'done' : 'pending',
+          audioUrl: s.audioUrl,
+        })));
     else
       setSegments([]);
   }, [scenes]);
@@ -1769,11 +1797,15 @@ const VoiceStep = () => {
           setSegments(prev => prev.map((p, j) =>
             j === i ? { ...p, status: 'done' as const, audioUrl: url, durationSec: duration_ms / 1000 } : p
           ));
-          setScenes(prev => prev.map((s, j) => {
-            if (j !== i) return s;
-            const durationSec = duration_ms / 1000;
-            return { ...s, audioUrl: url, audioDurationSec: durationSec, duration: durationSec };
-          }));
+          setScenes(prev => {
+            const next = prev.map((s, j) => {
+              if (j !== i) return s;
+              const durationSec = duration_ms / 1000;
+              return { ...s, audioUrl: url, durationSec, audioDurationSec: durationSec, duration: durationSec };
+            });
+            setSceneDurations(next.map(s => (s.durationSec ?? s.audioDurationSec ?? 0) || 0));
+            return next;
+          });
         } catch {
           setSegments(prev => prev.map((p, j) => j === i ? { ...p, status: 'pending' as const } : p));
         }
@@ -1888,7 +1920,7 @@ const VoiceStep = () => {
 
 // --- [Step 6: AI 영상 생성] ---
 const VideoStep = ({ showToast }: { showToast: (msg: string) => void }) => {
-  const { sessionId, scenes, videoFormat, subtitlesEnabled, setSubtitlesEnabled, burnInSubtitles, setBurnInSubtitles } = useGlobal();
+  const { sessionId, scenes, videoFormat, subtitlesEnabled, setSubtitlesEnabled, burnInSubtitles, setBurnInSubtitles, setVideoUrl } = useGlobal();
   const [taskId, setTaskId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<'idle' | 'pending' | 'running' | 'success' | 'failure'>('idle');
   const [jobError, setJobError] = useState<string | null>(null);
@@ -1900,14 +1932,16 @@ const VideoStep = ({ showToast }: { showToast: (msg: string) => void }) => {
     return (scenes || []).map((s, idx) => ({
       id: s.id,
       label: `씬 ${idx + 1}`,
-      hasImage: !!s.imageUrl,
-      hasAudio: !!s.audioUrl,
-      duration: Number.isFinite(s.audioDurationSec as number) && (s.audioDurationSec as number) > 0
-        ? (s.audioDurationSec as number)
-        : (Number.isFinite(s.duration) && s.duration > 0 ? s.duration : 5),
-      text: s.narrative || '',
-    }));
-  }, [scenes]);
+	      hasImage: !!s.imageUrl,
+	      hasAudio: !!s.audioUrl,
+	      duration: Number.isFinite(s.durationSec as number) && (s.durationSec as number) > 0
+	        ? (s.durationSec as number)
+	        : (Number.isFinite(s.audioDurationSec as number) && (s.audioDurationSec as number) > 0
+	          ? (s.audioDurationSec as number)
+	          : (Number.isFinite(s.duration) && s.duration > 0 ? s.duration : 5)),
+	      text: s.narrative || '',
+	    }));
+	  }, [scenes]);
 
   const totalDuration = useMemo(() => timeline.reduce((acc, t) => acc + (t.duration || 0), 0), [timeline]);
   const readyScenes = useMemo(() => timeline.filter(t => t.hasImage && t.hasAudio), [timeline]);
@@ -2054,7 +2088,9 @@ const VideoStep = ({ showToast }: { showToast: (msg: string) => void }) => {
         if (cancelled) return;
         setJobStatus(s.status);
         if (s.status === 'success') {
-          setResultVideoUrl(s.result?.video_url || null);
+          const vurl = s.result?.video_url || null;
+          setResultVideoUrl(vurl);
+          setVideoUrl(vurl);
           setResultSrtUrl((s.result?.captions as any)?.srt_url || null);
           setResultVttUrl((s.result?.captions as any)?.vtt_url || null);
           showToast('영상 렌더링이 완료되었습니다.');
@@ -2188,13 +2224,20 @@ const VideoStep = ({ showToast }: { showToast: (msg: string) => void }) => {
 
 // --- [Step 7: 최적화 메타 설정 — AI 자동 생성] ---
 const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
-  const { selectedTopic, finalTopic, planningData } = useGlobal();
+  const {
+    selectedTopic,
+    finalTopic,
+    planningData,
+    metaTitle,
+    setMetaTitle,
+    metaDescription,
+    setMetaDescription,
+    metaPinnedComment,
+    setMetaPinnedComment,
+  } = useGlobal();
   const topicForMeta = (finalTopic || selectedTopic || '').trim();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [pinnedComment, setPinnedComment] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedOnce, setGeneratedOnce] = useState(false);
+  const [generatedOnce, setGeneratedOnce] = useState(() => !!(metaTitle || metaDescription || metaPinnedComment));
 
   const handleGenerateAll = async () => {
     setIsGenerating(true);
@@ -2204,9 +2247,9 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
         summary: planningData?.summary,
         targetDuration: planningData?.targetDuration,
       });
-      setTitle(meta.title);
-      setDescription(meta.description);
-      setPinnedComment(meta.pinnedComment);
+      setMetaTitle(meta.title);
+      setMetaDescription(meta.description);
+      setMetaPinnedComment(meta.pinnedComment);
       setGeneratedOnce(true);
       showToast('메타데이터 생성이 완료되었습니다.');
     } catch (e) {
@@ -2224,9 +2267,9 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
         summary: planningData?.summary,
         targetDuration: planningData?.targetDuration,
       });
-      if (field === 'title') setTitle(meta.title);
-      if (field === 'description') setDescription(meta.description);
-      if (field === 'pinnedComment') setPinnedComment(meta.pinnedComment);
+      if (field === 'title') setMetaTitle(meta.title);
+      if (field === 'description') setMetaDescription(meta.description);
+      if (field === 'pinnedComment') setMetaPinnedComment(meta.pinnedComment);
       showToast(`${field === 'title' ? '제목' : field === 'description' ? '설명' : '고정댓글'}을 다시 생성했습니다.`);
     } catch (e) {
       showToast('다시 생성에 실패했습니다.');
@@ -2271,8 +2314,8 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
           </div>
           <input
             type="text"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
+            value={metaTitle}
+            onChange={e => setMetaTitle(e.target.value)}
             placeholder="AI 생성 버튼을 누르면 제목이 생성됩니다"
             className="ui-input"
           />
@@ -2291,8 +2334,8 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
             </button>
           </div>
           <textarea
-            value={description}
-            onChange={e => setDescription(e.target.value)}
+            value={metaDescription}
+            onChange={e => setMetaDescription(e.target.value)}
             placeholder="타임라인과 해시태그가 포함된 영상 설명이 생성됩니다"
             className="ui-textarea min-h-[200px] whitespace-pre-wrap"
           />
@@ -2311,8 +2354,8 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
             </button>
           </div>
           <textarea
-            value={pinnedComment}
-            onChange={e => setPinnedComment(e.target.value)}
+            value={metaPinnedComment}
+            onChange={e => setMetaPinnedComment(e.target.value)}
             placeholder="영상 업로드 후 고정할 댓글 문구가 생성됩니다"
             className="ui-textarea min-h-[120px]"
           />
@@ -2331,9 +2374,10 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
 
 // --- [Step 8: 썸네일 연구소] ---
 const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
-  const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>(MOCK_THUMBNAILS);
-  const [ytUrlInput, setYtUrlInput] = useState('');
-  const [ytThumbnailUrl, setYtThumbnailUrl] = useState<string | null>(null);
+  const { thumbnailData, setThumbnailData } = useGlobal();
+  const thumbnails = (thumbnailData.thumbnails?.length ?? 0) > 0 ? (thumbnailData.thumbnails as ThumbnailCandidate[]) : MOCK_THUMBNAILS;
+  const ytUrlInput = thumbnailData.ytUrlInput || '';
+  const ytThumbnailUrl = thumbnailData.ytThumbnailUrl;
   const [ytThumbnailError, setYtThumbnailError] = useState(false);
   const [isBenchmarking, setIsBenchmarking] = useState(false);
   const [benchmarkSummary, setBenchmarkSummary] = useState<string | null>(null);
@@ -2341,13 +2385,13 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
   const loadYtThumbnail = () => {
     const id = getYoutubeVideoId(ytUrlInput);
     if (!id) {
-      setYtThumbnailUrl(null);
+      setThumbnailData(prev => ({ ...prev, ytThumbnailUrl: null }));
       setYtThumbnailError(true);
       showToast('유효한 유튜브 URL을 입력해주세요.');
       return;
     }
     setYtThumbnailError(false);
-    setYtThumbnailUrl(getYoutubeThumbnailUrl(id));
+    setThumbnailData(prev => ({ ...prev, ytThumbnailUrl: getYoutubeThumbnailUrl(id) }));
   };
 
   const handleBenchmark = async () => {
@@ -2367,7 +2411,10 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
         ctrHint: '레퍼런스 분석 기반 생성',
         isSelected: false,
       };
-      setThumbnails(prev => [...prev, newThumb]);
+      setThumbnailData(prev => {
+        const base = (prev.thumbnails?.length ?? 0) > 0 ? prev.thumbnails : MOCK_THUMBNAILS;
+        return { ...prev, thumbnails: [...base, newThumb] };
+      });
       showToast('벤치마킹 썸네일이 생성되었습니다.');
     } catch (e) {
       showToast('벤치마킹 생성에 실패했습니다.');
@@ -2377,7 +2424,10 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
   };
 
   const selectThumb = (id: string) => {
-    setThumbnails(prev => prev.map(t => ({ ...t, isSelected: t.id === id })));
+    setThumbnailData(prev => {
+      const base = (prev.thumbnails?.length ?? 0) > 0 ? prev.thumbnails : MOCK_THUMBNAILS;
+      return { ...prev, thumbnails: base.map((t: ThumbnailCandidate) => ({ ...t, isSelected: t.id === id })) };
+    });
   };
 
   const downloadImage = async (url: string, filename: string) => {
@@ -2417,14 +2467,17 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
       <div className="ui-card space-y-4">
         <span className="ui-label">유튜브 썸네일 불러오기</span>
         <div className="flex flex-col sm:flex-row gap-3">
-          <input
-            type="text"
-            value={ytUrlInput}
-            onChange={e => { setYtUrlInput(e.target.value); setYtThumbnailError(false); }}
-            onKeyDown={e => e.key === 'Enter' && loadYtThumbnail()}
-            placeholder="https://www.youtube.com/watch?v=... 또는 youtu.be/..."
-            className="ui-input flex-1"
-          />
+	          <input
+	            type="text"
+	            value={ytUrlInput}
+	            onChange={e => {
+	              setThumbnailData(prev => ({ ...prev, ytUrlInput: e.target.value }));
+	              setYtThumbnailError(false);
+	            }}
+	            onKeyDown={e => e.key === 'Enter' && loadYtThumbnail()}
+	            placeholder="https://www.youtube.com/watch?v=... 또는 youtu.be/..."
+	            className="ui-input flex-1"
+	          />
           <button type="button" onClick={loadYtThumbnail} className="ui-btn ui-btn--secondary shrink-0">
             <LinkIcon size={14} /> 썸네일 불러오기
           </button>
@@ -2435,12 +2488,12 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
           <div className="space-y-3">
             <p className="text-sm text-slate-600">해당 영상 썸네일</p>
             <div className="inline-block rounded-2xl border border-border/70 overflow-hidden bg-secondary/45 max-w-md">
-              <img
-                src={ytThumbnailUrl}
-                alt="유튜브 썸네일"
-                className="aspect-video w-full object-cover block"
-                onError={() => { setYtThumbnailUrl(null); setYtThumbnailError(true); }}
-              />
+	              <img
+	                src={ytThumbnailUrl}
+	                alt="유튜브 썸네일"
+	                className="aspect-video w-full object-cover block"
+	                onError={() => { setThumbnailData(prev => ({ ...prev, ytThumbnailUrl: null })); setYtThumbnailError(true); }}
+	              />
             </div>
             <button
               type="button"

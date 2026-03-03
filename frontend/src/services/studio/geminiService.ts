@@ -458,6 +458,22 @@ export const splitMasterPlanToSteps = async (context: {
   };
 };
 
+/** 목표 재생 시간(문자열)을 초 단위로 변환. 30s→30, 1m→60, 3m→180, 5m→300 */
+export function targetDurationToSeconds(td: string | undefined): number {
+  if (!td || typeof td !== 'string') return 0;
+  const s = td.trim().toLowerCase();
+  if (s.endsWith('s')) return Math.max(0, parseInt(s, 10) || 0);
+  if (s.endsWith('m')) return Math.max(0, (parseInt(s, 10) || 0) * 60);
+  return 0;
+}
+
+/** 목표 시간(초)에 맞는 대략적인 한글 글자 수 가이드 (TTS 기준 분당 약 280자) */
+function targetDurationToCharHint(sec: number): string {
+  if (sec <= 0) return '';
+  const chars = Math.floor((sec / 60) * 280);
+  return `권장: 전체 대본은 약 ${chars}자 내외 (한국어 TTS 기준 약 ${sec}초).`;
+}
+
 export const synthesizeMasterScript = async (context: {
   topic: string;
   planningData: any;
@@ -478,16 +494,25 @@ export const synthesizeMasterScript = async (context: {
     'Do not output any keys other than master_script.',
     context.styleRules ? `Style rules:\n${context.styleRules}` : '',
   ].join('\n');
+  const planning = context.planningData || {};
+  const targetSec = targetDurationToSeconds(planning.targetDuration);
+  const durationGuide = targetSec > 0
+    ? `Target duration: ${planning.targetDuration} (~${targetSec}s). ${targetDurationToCharHint(targetSec)}`
+    : '';
+
   const benchmarkSummary = typeof context.benchmarkSummary === 'string' ? context.benchmarkSummary.trim() : '';
   const benchmarkPatterns = Array.isArray(context.benchmarkPatterns) ? context.benchmarkPatterns.filter(Boolean) : [];
   const prompt = [
     `Topic: ${context.topic}.`,
     `Style (user-selected): ${context.style}.`,
+    durationGuide ? durationGuide : '',
     benchmarkSummary || benchmarkPatterns.length
       ? `Benchmarking summary: ${benchmarkSummary || '(none)'}. Benchmarking patterns: ${benchmarkPatterns.length ? benchmarkPatterns.join(' | ') : '(none)'}.`
       : '',
-    `Planning (JSON): ${JSON.stringify(context.planningData || {})}.`,
-    'Write the full master script in Korean. Return JSON.',
+    `Planning (JSON): ${JSON.stringify(planning)}.`,
+    'Write the full master script in Korean.',
+    'Include narration and, when helpful, optional timestamps/seconds (e.g. [0-3초]), music cues (e.g. 음악: ...), and screen directions (e.g. 화면: ...).',
+    'Return JSON.',
   ].filter(Boolean).join(' ');
   try {
     const { output } = await studioLlm({ prompt, system_prompt: sys, model: 'google/gemini-2.5-flash' });
@@ -499,6 +524,36 @@ export const synthesizeMasterScript = async (context: {
   }
 };
 
+/**
+ * 대본(script_segment)에서 음악·초·화면 지시를 제거하고 내레이션만 남김.
+ * - "음악: ..." 줄 제거
+ * - "[0-3초]", "[3-5초]" 등 시간 구간 및 "화면: ..." 줄 제거
+ * - (음악: ...), (화면: ...) 괄호 블록 제거
+ */
+export function sanitizeScriptSegment(raw: string): string {
+  let text = (raw || '').trim();
+  if (!text) return text;
+  const narrationMarkers = ['**내레이션:**', '내레이션:'];
+  for (const marker of narrationMarkers) {
+    const idx = text.indexOf(marker);
+    if (idx !== -1) {
+      text = text.slice(idx + marker.length).trim();
+      break;
+    }
+  }
+  text = text
+    .replace(/\(화면\s*:\s*[^)]*\)/g, '')
+    .replace(/\(음악\s*:\s*[^)]*\)/g, '')
+    .replace(/^음악\s*:\s*[^\n]*\n?/gm, '')
+    .replace(/^\[\s*[^\]]*초\s*\]\s*화면\s*:\s*[^\n]*\n?/gm, '')
+    .replace(/^\[\s*[^\]]*초\s*\]\s*[^\n]*\n?/gm, '')
+    .replace(/^화면\s*:\s*[^\n]*\n?/gm, '')
+    .replace(/\*\*\[\s*[^\]]*\]\s*[^*]*\*\*/g, '')
+    .replace(/\n\s*\n/g, '\n')
+    .trim();
+  return text || raw.trim();
+}
+
 export const splitScriptIntoScenes = async (fullScript: string) => {
   const sys = [
     buildStudioPersona({
@@ -506,15 +561,21 @@ export const splitScriptIntoScenes = async (fullScript: string) => {
       domain: 'storyboarding, beat mapping, and visual continuity for YouTube videos',
     }),
     'Reply with JSON only: an array of { "script_segment": string, "scene_description": string }.',
-    'script_segment must be Korean narration text. scene_description must be an English visual prompt for image generation.',
-  ].join(' ');
-  const prompt = `Split this script into scene items. Each item: script_segment (narration text), scene_description (visual prompt for image). Script:\n${fullScript}\nReturn JSON array only.`;
+    'Rules for script_segment:',
+    '- Put ONLY the spoken narration (내레이션) that will be read aloud. No music cues, no timestamps, no visual directions.',
+    '- Do NOT include: "음악: ...", "[0-3초]", "화면: ...", or similar. Those belong in scene_description or nowhere.',
+    'scene_description should describe the visual in English (can include timing/mood for the visual).',
+  ].join('\n');
+  const prompt = `Split this script into scene items. Each item:
+- script_segment: ONLY the narration text (what the narrator says). No music, no seconds/timestamps, no "화면:" directions.
+- scene_description: visual prompt for image (can include timing/mood for the visual).
+Script:\n${fullScript}\nReturn JSON array only.`;
   try {
     const { output } = await studioLlm({ prompt, system_prompt: sys, model: 'google/gemini-2.5-flash' });
     const parsed = safeJsonParse<Array<{ script_segment?: string; scene_description?: string }>>(output, []);
     if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed.map(p => ({
-        script_segment: p.script_segment ?? '',
+        script_segment: sanitizeScriptSegment(p.script_segment ?? ''),
         scene_description: p.scene_description ?? 'Cinematic scene.',
       }));
     }
@@ -585,6 +646,8 @@ export const generateScenePrompt = async (
 /**
  * 장면 이미지 생성. model은 styleLab의 model 값 (예: fal-ai/imagen4/preview).
  */
+const NO_TEXT_PROMPT_SUFFIX = ', no text, no letters, no words in the image';
+
 export const generateSceneImage = async (
   prompt: string,
   style: string,
@@ -593,9 +656,10 @@ export const generateSceneImage = async (
   referenceImageUrl?: string
 ): Promise<string> => {
   const falModel = model || 'fal-ai/imagen4/preview';
+  const promptWithNoText = (prompt || '').trim() + NO_TEXT_PROMPT_SUFFIX;
   try {
     const { images } = await studioImage({
-      prompt,
+      prompt: promptWithNoText,
       model: falModel,
       aspect_ratio: aspectRatio,
       num_images: 1,

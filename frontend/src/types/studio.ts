@@ -11,7 +11,13 @@ export interface StudioScene {
   isPromptVisible: boolean;
   isSyncing: boolean;
   isGenerating?: boolean;
+  /** 씬 추가 버튼으로 추가된 씬만 true (대본 분할로 생성된 씬은 false/미설정) */
+  isManualAdd?: boolean;
+  /** Step 5 음성 합성 후 저장된 오디오 URL */
   audioUrl?: string;
+  /** Step 5 음성 합성 후 저장된 재생 길이(초) */
+  durationSec?: number;
+  /** @deprecated durationSec를 사용하세요. */
   audioDurationSec?: number;
 }
 
@@ -71,6 +77,9 @@ export interface StudioGlobalContextType {
   setDescriptionInput: React.Dispatch<React.SetStateAction<string>>;
   scenes: StudioScene[];
   setScenes: React.Dispatch<React.SetStateAction<StudioScene[]>>;
+  /** Step 5 음성 합성 후 씬별 재생 길이(초). Step 6 영상 생성 시 이 값을 우선 사용. */
+  sceneDurations: number[];
+  setSceneDurations: React.Dispatch<React.SetStateAction<number[]>>;
   scriptSegments: StudioScriptSegment[];
   setScriptSegments: React.Dispatch<React.SetStateAction<StudioScriptSegment[]>>;
 
@@ -85,6 +94,8 @@ export interface StudioGlobalContextType {
   
   scriptStyle: string;
   setScriptStyle: React.Dispatch<React.SetStateAction<string>>;
+  customScriptStyleText: string;
+  setCustomScriptStyleText: React.Dispatch<React.SetStateAction<string>>;
 
   scriptLength: string;
   setScriptLength: React.Dispatch<React.SetStateAction<string>>;
@@ -118,4 +129,28 @@ export interface StudioGlobalContextType {
   setBurnInSubtitles: React.Dispatch<React.SetStateAction<boolean>>;
   referenceImageUrl: string;
   setReferenceImageUrl: React.Dispatch<React.SetStateAction<string>>;
+
+  // Step 7 메타데이터
+  metaTitle: string;
+  setMetaTitle: React.Dispatch<React.SetStateAction<string>>;
+  metaDescription: string;
+  setMetaDescription: React.Dispatch<React.SetStateAction<string>>;
+  metaPinnedComment: string;
+  setMetaPinnedComment: React.Dispatch<React.SetStateAction<string>>;
+
+  /** Step 6에서 생성된 영상 URL. 새로고침 후에도 유지. */
+  videoUrl: string | null;
+  setVideoUrl: React.Dispatch<React.SetStateAction<string | null>>;
+
+  // Step 8 썸네일
+  thumbnailData: {
+    thumbnails: Array<{ id: string; title: string; imagePlaceholder?: string; imageUrl?: string; ctrHint: string; isSelected: boolean }>;
+    ytUrlInput: string;
+    ytThumbnailUrl: string | null;
+  };
+  setThumbnailData: React.Dispatch<React.SetStateAction<{
+    thumbnails: Array<{ id: string; title: string; imagePlaceholder?: string; imageUrl?: string; ctrHint: string; isSelected: boolean }>;
+    ytUrlInput: string;
+    ytThumbnailUrl: string | null;
+  }>>;
 }

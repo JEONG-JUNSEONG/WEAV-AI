@@ -8,6 +8,7 @@ const STUDIO_YOUTUBE_BENCHMARK_ANALYZE = '/api/v1/studio/youtube-benchmark-analy
 const STUDIO_EXPORT = '/api/v1/studio/export/';
 const STUDIO_EXPORT_JOB = '/api/v1/studio/export/job/';
 const STUDIO_UPLOAD_REFERENCE_IMAGE = '/api/v1/chat/image/upload-reference/';
+const STUDIO_VIDEO = '/api/v1/studio/video/';
 
 export interface StudioLlmOptions {
   prompt: string;
@@ -166,4 +167,25 @@ export async function studioExportJobStatus(taskId: string): Promise<StudioExpor
 
 export async function studioExportJobCancel(taskId: string): Promise<{ status: string }> {
   return api.post<{ status: string }>(`${STUDIO_EXPORT_JOB}${encodeURIComponent(taskId)}/cancel/`, {});
+}
+
+export interface StudioVideoClip {
+  image_url: string;
+  audio_url: string;
+  duration_sec: number;
+}
+
+export interface StudioExportVideoOptions {
+  clips: StudioVideoClip[];
+  aspect_ratio?: string;
+}
+
+/** Studio Step 6: 이미지+음성 클립을 합쳐 영상으로 내보내기 (fal ffmpeg compose). */
+export async function studioExportVideo(options: StudioExportVideoOptions): Promise<{ video_url?: string; thumbnail_url?: string }> {
+  const { clips, aspect_ratio } = options;
+  return api.post<{ video_url?: string; thumbnail_url?: string }>(
+    STUDIO_VIDEO,
+    { clips, ...(aspect_ratio != null && { aspect_ratio }) },
+    { timeoutMs: 600_000 }
+  );
 }
