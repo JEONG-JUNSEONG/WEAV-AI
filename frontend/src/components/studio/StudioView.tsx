@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   X, History, Ghost, BookOpen, TrendingUp, Globe, MonitorPlay, ChevronRight, Flame, Loader2,
   CheckCircle2, PlayCircle, Layers, Trash2, Link as LinkIcon, Sparkles, Target, Terminal,
+  Download,
   Image as ImageIcon, Video, Wand2, Camera, Plus, Mic2, FileText, AlignLeft, Settings2,
 	  Sliders, Music4, Activity, Smartphone, Monitor, PenTool, RefreshCcw, Utensils,
 	  MessageCircle, Zap, Hash, Compass, Sword, Microscope, Palette, Map, Film, Heart, Gift,
@@ -17,6 +18,7 @@ import {
 } from '@/services/studio/geminiService';
 import { studioTts, uploadStudioReferenceImage, studioExport, studioExportJobStatus, studioExportJobCancel } from '@/services/studio/studioFalApi';
 import { fetchTrendingByCategory, formatTrendingGrowth, type TrendingItemWithCategory } from '@/services/studio/trendingApi';
+import { InputDialog } from '@/components/ui/InputDialog';
 
 // --- [전역 상태 관리] ---
 const GlobalContext = createContext<StudioGlobalContextType | undefined>(undefined);
@@ -293,73 +295,6 @@ const SectionHeader = ({
     {right}
   </div>
 );
-
-// --- [사이드바] ---
-const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean, toggleSidebar: () => void }) => {
-  const { currentStep, setCurrentStep, isDevMode, setIsDevMode } = useGlobal();
-  const steps = [
-    { id: 1, name: '1. 기획 및 전략 분석', icon: <Target size={18}/> },
-    { id: 2, name: '2. 영상 주제 선정', icon: <Sparkles size={18}/> },
-    { id: 3, name: '3. 대본 구조 설계', icon: <PenTool size={18}/> },
-    { id: 4, name: '4. 이미지 및 대본 생성', icon: <ImageIcon size={18}/> },
-    { id: 5, name: '5. AI 음성 생성', icon: <Mic2 size={18}/> },
-    { id: 6, name: '6. AI 영상 생성', icon: <Video size={18}/> },
-    { id: 7, name: '7. 최적화 메타 설정', icon: <Monitor size={18}/> },
-    { id: 8, name: '8. 썸네일 연구소', icon: <ImageIcon size={18}/> }
-  ];
-
-  return (
-    <>
-      {isOpen && <div className="fixed inset-0 bg-black/40 z-[45] backdrop-blur-sm lg:hidden" onClick={toggleSidebar} />}
-      <aside className={`fixed lg:static inset-y-0 left-0 w-72 bg-white border-r border-slate-200 flex flex-col z-50 transition-all duration-300 shadow-2xl lg:shadow-none ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} shrink-0`}>
-        <div className="h-32 px-12 border-b border-slate-100 flex items-center justify-center">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center">
-              <Zap size={18} fill="currentColor" className="text-yellow-400" />
-            </div>
-            <div className="flex flex-col">
-              <span className="ui-label">WEAV STUDIO</span>
-              <span className="font-serif text-lg text-slate-900">Creative Suite</span>
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-2 scrollbar-hide">
-          {steps.map(s => {
-            const isActive = currentStep === s.id;
-            const isLocked = !isDevMode && s.id > currentStep;
-            return (
-              <div
-                key={s.id}
-                className={`group flex items-center gap-7 px-12 py-6 cursor-pointer transition-all duration-500 relative ${isActive ? 'bg-slate-50/70' : isLocked ? 'opacity-20 cursor-not-allowed' : 'hover:bg-slate-50/40'}`}
-                onClick={() => !isLocked && (setCurrentStep(s.id), window.innerWidth < 1024 && toggleSidebar())}
-              >
-                <div className={`w-11 h-11 rounded-[1.2rem] flex items-center justify-center text-[13px] font-black border-2 transition-all duration-500 ${isActive ? 'bg-slate-900 border-slate-900 text-white shadow-xl rotate-6' : 'bg-white border-slate-200 text-slate-700 group-hover:text-slate-900'}`}>
-                  {isLocked ? <Lock size={12} /> : s.id}
-                </div>
-                <div className="flex-1 flex flex-col">
-                  <span className={`text-[14px] font-black uppercase tracking-tight transition-colors duration-300 ${isActive ? 'text-slate-900 italic' : 'text-slate-700 group-hover:text-slate-900'}`}>{s.name}</span>
-                  {isActive && <div className="h-[2.5px] w-full bg-rose-600 mt-1.5 animate-in slide-in-from-left duration-700 shadow-lg shadow-rose-200" />}
-                </div>
-                {isActive && <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-12 bg-rose-600 rounded-l-full shadow-xl shadow-rose-200" />}
-              </div>
-            );
-          })}
-        </nav>
-
-        <div className="p-12 border-t border-slate-100 flex items-center justify-between bg-slate-50/30">
-          <button onClick={() => setIsDevMode(!isDevMode)} className={`p-4 rounded-[1.2rem] transition-all duration-500 shadow-sm border ${isDevMode ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white text-slate-700 border-slate-200 hover:text-slate-900'}`}>
-            <Terminal size={20} />
-          </button>
-          <div className="flex flex-col items-end">
-            <p className={`text-[10px] font-black uppercase tracking-widest leading-none ${isDevMode ? 'text-slate-900' : 'text-slate-700'}`}>Workspace Status</p>
-            <p className="text-[9px] text-slate-700 font-bold mt-2 tracking-tighter italic">V 1.2 PRO STABLE</p>
-          </div>
-        </div>
-      </aside>
-    </>
-  );
-};
 
 // --- [Step 1: 기획 및 전략 분석] ---
 const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) => {
@@ -2749,6 +2684,7 @@ const PreviewStep = ({ showToast }: { showToast: (msg: string) => void }) => {
 // --- [메인 레이아웃 쉘] ---
 const AppContent = ({ projectName }: { projectName: string }) => {
   const {
+    sessionId,
     currentStep, setCurrentStep, isLoading, loadingMessage, setDescriptionInput, setIsFileLoaded, isDevMode, setIsDevMode,
     videoFormat, setVideoFormat, scriptStyle, setScriptStyle, planningData, setPlanningData,
     selectedStyle, setSelectedStyle, selectedVoicePresetId, setSelectedVoicePresetId,
@@ -2756,7 +2692,12 @@ const AppContent = ({ projectName }: { projectName: string }) => {
   } = useGlobal();
   const [toast, setToast] = useState<string | null>(null);
   const [isGlobalDragging, setIsGlobalDragging] = useState(false);
+  const [showPresetSaveDialog, setShowPresetSaveDialog] = useState(false);
   const PRESET_KEY = 'weav_studio_presets_v1';
+  const selectedPresetStorageKey = useMemo(
+    () => `weav_studio_selected_preset_id_v1${sessionId != null ? `_${sessionId}` : ''}`,
+    [sessionId]
+  );
   type StudioPreset = {
     id: string;
     name: string;
@@ -2780,7 +2721,29 @@ const AppContent = ({ projectName }: { projectName: string }) => {
       return [];
     }
   });
-  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
+  const [selectedPresetId, setSelectedPresetIdState] = useState<string>(() => {
+    try {
+      const key = `weav_studio_selected_preset_id_v1${sessionId != null ? `_${sessionId}` : ''}`;
+      const raw = localStorage.getItem(PRESET_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : [];
+      const saved = localStorage.getItem(key);
+      const id = typeof saved === 'string' ? saved : '';
+      if (id && list.some((p: StudioPreset) => p.id === id)) return id;
+      return '';
+    } catch {
+      return '';
+    }
+  });
+
+  const setSelectedPresetId = useCallback((id: string) => {
+    setSelectedPresetIdState(id);
+    try {
+      localStorage.setItem(selectedPresetStorageKey, id);
+    } catch {
+      /* ignore */
+    }
+  }, [selectedPresetStorageKey]);
 
   const showToast = useCallback((msg: string) => { 
     setToast(msg); 
@@ -2797,8 +2760,11 @@ const AppContent = ({ projectName }: { projectName: string }) => {
   };
 
   const handleSavePreset = () => {
-    const name = window.prompt('프리셋 이름을 입력하세요', `내 프리셋 ${presets.length + 1}`);
-    if (!name) return;
+    setShowPresetSaveDialog(true);
+  };
+
+  const confirmSavePreset = (name: string) => {
+    setShowPresetSaveDialog(false);
     const preset: StudioPreset = {
       id: `preset-${Date.now()}`,
       name: name.trim().slice(0, 48) || `내 프리셋 ${presets.length + 1}`,
@@ -2857,17 +2823,6 @@ const AppContent = ({ projectName }: { projectName: string }) => {
     reader.readAsText(file);
   };
 
-  const stepTitles = [
-    '1. 기획 및 전략 분석',
-    '2. 영상 주제 선정',
-    '3. 대본 구조 설계',
-    '4. 이미지 및 대본 생성',
-    '5. AI 음성 생성',
-    '6. AI 영상 생성',
-    '7. 최적화 메타 설정',
-    '8. 썸네일 연구소'
-  ];
-
   const topSteps = [
     { id: 1, label: '기획', icon: <Target size={14}/> },
     { id: 2, label: '주제', icon: <Sparkles size={14}/> },
@@ -2903,6 +2858,18 @@ const AppContent = ({ projectName }: { projectName: string }) => {
           </div>
         </div>
       )}
+
+      <InputDialog
+        open={showPresetSaveDialog}
+        title="프리셋 저장"
+        message="프리셋 이름을 입력하세요"
+        placeholder={`내 프리셋 ${presets.length + 1}`}
+        defaultValue={`내 프리셋 ${presets.length + 1}`}
+        confirmLabel="저장"
+        cancelLabel="취소"
+        onConfirm={confirmSavePreset}
+        onCancel={() => setShowPresetSaveDialog(false)}
+      />
 
       {isGlobalDragging && (
         <div className="absolute inset-0 z-[90] bg-background/56 backdrop-blur-sm flex items-center justify-center text-foreground text-sm font-medium">
