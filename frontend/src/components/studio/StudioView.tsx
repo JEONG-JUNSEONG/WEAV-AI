@@ -294,6 +294,73 @@ const SectionHeader = ({
   </div>
 );
 
+// --- [사이드바] ---
+const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean, toggleSidebar: () => void }) => {
+  const { currentStep, setCurrentStep, isDevMode, setIsDevMode } = useGlobal();
+  const steps = [
+    { id: 1, name: '1. 기획 및 전략 분석', icon: <Target size={18}/> },
+    { id: 2, name: '2. 영상 주제 선정', icon: <Sparkles size={18}/> },
+    { id: 3, name: '3. 대본 구조 설계', icon: <PenTool size={18}/> },
+    { id: 4, name: '4. 이미지 및 대본 생성', icon: <ImageIcon size={18}/> },
+    { id: 5, name: '5. AI 음성 생성', icon: <Mic2 size={18}/> },
+    { id: 6, name: '6. AI 영상 생성', icon: <Video size={18}/> },
+    { id: 7, name: '7. 최적화 메타 설정', icon: <Monitor size={18}/> },
+    { id: 8, name: '8. 썸네일 연구소', icon: <ImageIcon size={18}/> }
+  ];
+
+  return (
+    <>
+      {isOpen && <div className="fixed inset-0 bg-black/40 z-[45] backdrop-blur-sm lg:hidden" onClick={toggleSidebar} />}
+      <aside className={`fixed lg:static inset-y-0 left-0 w-72 bg-white border-r border-slate-200 flex flex-col z-50 transition-all duration-300 shadow-2xl lg:shadow-none ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} shrink-0`}>
+        <div className="h-32 px-12 border-b border-slate-100 flex items-center justify-center">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center">
+              <Zap size={18} fill="currentColor" className="text-yellow-400" />
+            </div>
+            <div className="flex flex-col">
+              <span className="ui-label">WEAV STUDIO</span>
+              <span className="font-serif text-lg text-slate-900">Creative Suite</span>
+            </div>
+          </div>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-2 scrollbar-hide">
+          {steps.map(s => {
+            const isActive = currentStep === s.id;
+            const isLocked = !isDevMode && s.id > currentStep;
+            return (
+              <div
+                key={s.id}
+                className={`group flex items-center gap-7 px-12 py-6 cursor-pointer transition-all duration-500 relative ${isActive ? 'bg-slate-50/70' : isLocked ? 'opacity-20 cursor-not-allowed' : 'hover:bg-slate-50/40'}`}
+                onClick={() => !isLocked && (setCurrentStep(s.id), window.innerWidth < 1024 && toggleSidebar())}
+              >
+                <div className={`w-11 h-11 rounded-[1.2rem] flex items-center justify-center text-[13px] font-black border-2 transition-all duration-500 ${isActive ? 'bg-slate-900 border-slate-900 text-white shadow-xl rotate-6' : 'bg-white border-slate-200 text-slate-700 group-hover:text-slate-900'}`}>
+                  {isLocked ? <Lock size={12} /> : s.id}
+                </div>
+                <div className="flex-1 flex flex-col">
+                  <span className={`text-[14px] font-black uppercase tracking-tight transition-colors duration-300 ${isActive ? 'text-slate-900 italic' : 'text-slate-700 group-hover:text-slate-900'}`}>{s.name}</span>
+                  {isActive && <div className="h-[2.5px] w-full bg-rose-600 mt-1.5 animate-in slide-in-from-left duration-700 shadow-lg shadow-rose-200" />}
+                </div>
+                {isActive && <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-12 bg-rose-600 rounded-l-full shadow-xl shadow-rose-200" />}
+              </div>
+            );
+          })}
+        </nav>
+
+        <div className="p-12 border-t border-slate-100 flex items-center justify-between bg-slate-50/30">
+          <button onClick={() => setIsDevMode(!isDevMode)} className={`p-4 rounded-[1.2rem] transition-all duration-500 shadow-sm border ${isDevMode ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white text-slate-700 border-slate-200 hover:text-slate-900'}`}>
+            <Terminal size={20} />
+          </button>
+          <div className="flex flex-col items-end">
+            <p className={`text-[10px] font-black uppercase tracking-widest leading-none ${isDevMode ? 'text-slate-900' : 'text-slate-700'}`}>Workspace Status</p>
+            <p className="text-[9px] text-slate-700 font-bold mt-2 tracking-tighter italic">V 1.2 PRO STABLE</p>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+};
+
 // --- [Step 1: 기획 및 전략 분석] ---
 const TopicAnalysisStep = ({ showToast }: { showToast: (msg: string) => void }) => {
   const { 
@@ -2374,7 +2441,7 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
 
 // --- [Step 8: 썸네일 연구소] ---
 const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
-  const { thumbnailData, setThumbnailData } = useGlobal();
+  const { thumbnailData, setThumbnailData, setCurrentStep } = useGlobal();
   const thumbnails = (thumbnailData.thumbnails?.length ?? 0) > 0 ? (thumbnailData.thumbnails as ThumbnailCandidate[]) : MOCK_THUMBNAILS;
   const ytUrlInput = thumbnailData.ytUrlInput || '';
   const ytThumbnailUrl = thumbnailData.ytThumbnailUrl;
@@ -2546,6 +2613,135 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
           ))}
         </div>
       </div>
+
+      {setCurrentStep && (
+        <div className="pt-4">
+          <button
+            type="button"
+            onClick={() => setCurrentStep(9)}
+            className="ui-btn ui-btn--primary w-full flex items-center justify-center gap-2"
+          >
+            완성 미리보기 <ChevronRight size={18} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- [Step 9: 완성 미리보기] ---
+const PreviewStep = ({ showToast }: { showToast: (msg: string) => void }) => {
+  const { videoUrl, metaTitle, metaDescription, metaPinnedComment, thumbnailData, setCurrentStep } = useGlobal();
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const thumbnails = (thumbnailData?.thumbnails?.length ?? 0) > 0 ? thumbnailData.thumbnails as ThumbnailCandidate[] : [];
+  const selectedThumb = thumbnails.find((t: ThumbnailCandidate) => t.isSelected) ?? thumbnails[0];
+  const thumbImg = selectedThumb?.imageUrl ?? thumbnailData?.ytThumbnailUrl ?? null;
+
+  const handleDownload = async () => {
+    if (!videoUrl) {
+      showToast('영상을 먼저 생성해 주세요. (Step 6)');
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      const res = await fetch(videoUrl, { mode: 'cors' });
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = 'weav-studio-video.mp4';
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+      showToast('다운로드가 시작되었습니다.');
+    } catch {
+      showToast('다운로드에 실패했습니다. 링크가 만료되었을 수 있습니다.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
+      <SectionHeader
+        kicker="Step 9 / 미리보기"
+        title="완성 미리보기"
+        subtitle="유튜브 업로드 후 보이는 모습으로 한눈에 확인하세요."
+      />
+
+      <div className="ui-card overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+          {/* 영상/썸네일 영역 */}
+          <div className="lg:col-span-7">
+            <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+              {videoUrl ? (
+                <video
+                  src={videoUrl}
+                  controls
+                  playsInline
+                  className="w-full h-full object-contain"
+                  poster={thumbImg || undefined}
+                  preload="metadata"
+                >
+                  이 브라우저는 비디오 재생을 지원하지 않습니다.
+                </video>
+              ) : thumbImg ? (
+                <div className="relative w-full h-full">
+                  <img src={thumbImg} alt="썸네일" className="w-full h-full object-contain" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                    <p className="text-white/90 text-sm">Step 6에서 영상을 생성해 주세요</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500">
+                  <Film size={48} className="mb-2 opacity-50" />
+                  <p className="text-sm">영상·썸네일을 먼저 완성해 주세요</p>
+                  <p className="text-xs mt-1">Step 6 영상 생성 → Step 8 썸네일</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 메타데이터 영역 (유튜브 스타일) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground line-clamp-2">
+                {metaTitle || '제목 없음'}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">WEAV Studio</p>
+            </div>
+            <div className="rounded-xl border border-border/70 bg-secondary/45 px-4 py-3 text-sm text-muted-foreground whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+              {metaDescription || '설명이 없습니다. Step 7에서 메타데이터를 생성해 주세요.'}
+            </div>
+            {metaPinnedComment && (
+              <div className="rounded-xl border border-border/70 bg-secondary/30 px-4 py-3 text-sm">
+                <p className="text-xs font-medium text-muted-foreground mb-1">고정 댓글</p>
+                <p className="text-foreground whitespace-pre-wrap">{metaPinnedComment}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3 pt-6 border-t border-border/70 mt-6">
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={!videoUrl || isDownloading}
+            className="ui-btn ui-btn--primary"
+          >
+            {isDownloading ? <><Loader2 size={14} className="animate-spin" /> 다운로드 중...</> : <><Download size={14} /> 영상 다운로드</>}
+          </button>
+          {setCurrentStep && (
+            <button
+              type="button"
+              onClick={() => setCurrentStep(8)}
+              className="ui-btn ui-btn--secondary"
+            >
+              썸네일로 돌아가기
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -2661,6 +2857,17 @@ const AppContent = ({ projectName }: { projectName: string }) => {
     reader.readAsText(file);
   };
 
+  const stepTitles = [
+    '1. 기획 및 전략 분석',
+    '2. 영상 주제 선정',
+    '3. 대본 구조 설계',
+    '4. 이미지 및 대본 생성',
+    '5. AI 음성 생성',
+    '6. AI 영상 생성',
+    '7. 최적화 메타 설정',
+    '8. 썸네일 연구소'
+  ];
+
   const topSteps = [
     { id: 1, label: '기획', icon: <Target size={14}/> },
     { id: 2, label: '주제', icon: <Sparkles size={14}/> },
@@ -2669,7 +2876,8 @@ const AppContent = ({ projectName }: { projectName: string }) => {
     { id: 5, label: '음성', icon: <Mic2 size={14}/> },
     { id: 6, label: '영상', icon: <Video size={14}/> },
     { id: 7, label: '메타', icon: <Monitor size={14}/> },
-    { id: 8, label: '썸네일', icon: <ImageIcon size={14}/> }
+    { id: 8, label: '썸네일', icon: <ImageIcon size={14}/> },
+    { id: 9, label: '미리보기', icon: <Film size={14}/> }
   ];
 
   return (
@@ -2767,6 +2975,7 @@ const AppContent = ({ projectName }: { projectName: string }) => {
           {currentStep === 6 && <VideoStep showToast={showToast} />}
           {currentStep === 7 && <MetaStep showToast={showToast} />}
           {currentStep === 8 && <ThumbnailStep showToast={showToast} />}
+          {currentStep === 9 && <PreviewStep showToast={showToast} />}
         </div>
       </main>
       

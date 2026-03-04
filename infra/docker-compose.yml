@@ -41,6 +41,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - DEBUG=true
       - DATABASE_URL=postgresql://weavai:weavai@postgres:5432/weavai
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -79,6 +80,7 @@ services:
     volumes:
       - ../backend:/app
     environment:
+      - DEBUG=true
       - DATABASE_URL=postgresql://weavai:weavai@postgres:5432/weavai
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
