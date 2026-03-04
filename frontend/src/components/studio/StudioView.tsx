@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, createContext, useCont
 import {
   X, History, Ghost, BookOpen, TrendingUp, Globe, MonitorPlay, ChevronRight, Flame, Loader2,
   CheckCircle2, PlayCircle, Layers, Trash2, Link as LinkIcon, Sparkles, Target, Terminal,
+  Download,
   Image as ImageIcon, Video, Wand2, Camera, Plus, Mic2, FileText, AlignLeft, Settings2,
 	  Sliders, Music4, Activity, Smartphone, Monitor, PenTool, RefreshCcw, Utensils,
 	  MessageCircle, Zap, Hash, Compass, Sword, Microscope, Palette, Map, Film, Heart, Gift,
@@ -17,6 +18,7 @@ import {
 } from '@/services/studio/geminiService';
 import { studioTts, uploadStudioReferenceImage, studioExport, studioExportJobStatus, studioExportJobCancel } from '@/services/studio/studioFalApi';
 import { fetchTrendingByCategory, formatTrendingGrowth, type TrendingItemWithCategory } from '@/services/studio/trendingApi';
+import { InputDialog } from '@/components/ui/InputDialog';
 
 // --- [전역 상태 관리] ---
 const GlobalContext = createContext<StudioGlobalContextType | undefined>(undefined);
@@ -2374,7 +2376,7 @@ const MetaStep = ({ showToast }: { showToast: (msg: string) => void }) => {
 
 // --- [Step 8: 썸네일 연구소] ---
 const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
-  const { thumbnailData, setThumbnailData } = useGlobal();
+  const { thumbnailData, setThumbnailData, setCurrentStep } = useGlobal();
   const thumbnails = (thumbnailData.thumbnails?.length ?? 0) > 0 ? (thumbnailData.thumbnails as ThumbnailCandidate[]) : MOCK_THUMBNAILS;
   const ytUrlInput = thumbnailData.ytUrlInput || '';
   const ytThumbnailUrl = thumbnailData.ytThumbnailUrl;
@@ -2546,6 +2548,135 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
           ))}
         </div>
       </div>
+
+      {setCurrentStep && (
+        <div className="pt-4">
+          <button
+            type="button"
+            onClick={() => setCurrentStep(9)}
+            className="ui-btn ui-btn--primary w-full flex items-center justify-center gap-2"
+          >
+            완성 미리보기 <ChevronRight size={18} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- [Step 9: 완성 미리보기] ---
+const PreviewStep = ({ showToast }: { showToast: (msg: string) => void }) => {
+  const { videoUrl, metaTitle, metaDescription, metaPinnedComment, thumbnailData, setCurrentStep } = useGlobal();
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const thumbnails = (thumbnailData?.thumbnails?.length ?? 0) > 0 ? thumbnailData.thumbnails as ThumbnailCandidate[] : [];
+  const selectedThumb = thumbnails.find((t: ThumbnailCandidate) => t.isSelected) ?? thumbnails[0];
+  const thumbImg = selectedThumb?.imageUrl ?? thumbnailData?.ytThumbnailUrl ?? null;
+
+  const handleDownload = async () => {
+    if (!videoUrl) {
+      showToast('영상을 먼저 생성해 주세요. (Step 6)');
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      const res = await fetch(videoUrl, { mode: 'cors' });
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = 'weav-studio-video.mp4';
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+      showToast('다운로드가 시작되었습니다.');
+    } catch {
+      showToast('다운로드에 실패했습니다. 링크가 만료되었을 수 있습니다.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-10 pb-24 max-w-[1200px] mx-auto">
+      <SectionHeader
+        kicker="Step 9 / 미리보기"
+        title="완성 미리보기"
+        subtitle="유튜브 업로드 후 보이는 모습으로 한눈에 확인하세요."
+      />
+
+      <div className="ui-card overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+          {/* 영상/썸네일 영역 */}
+          <div className="lg:col-span-7">
+            <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+              {videoUrl ? (
+                <video
+                  src={videoUrl}
+                  controls
+                  playsInline
+                  className="w-full h-full object-contain"
+                  poster={thumbImg || undefined}
+                  preload="metadata"
+                >
+                  이 브라우저는 비디오 재생을 지원하지 않습니다.
+                </video>
+              ) : thumbImg ? (
+                <div className="relative w-full h-full">
+                  <img src={thumbImg} alt="썸네일" className="w-full h-full object-contain" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                    <p className="text-white/90 text-sm">Step 6에서 영상을 생성해 주세요</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500">
+                  <Film size={48} className="mb-2 opacity-50" />
+                  <p className="text-sm">영상·썸네일을 먼저 완성해 주세요</p>
+                  <p className="text-xs mt-1">Step 6 영상 생성 → Step 8 썸네일</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 메타데이터 영역 (유튜브 스타일) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground line-clamp-2">
+                {metaTitle || '제목 없음'}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">WEAV Studio</p>
+            </div>
+            <div className="rounded-xl border border-border/70 bg-secondary/45 px-4 py-3 text-sm text-muted-foreground whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+              {metaDescription || '설명이 없습니다. Step 7에서 메타데이터를 생성해 주세요.'}
+            </div>
+            {metaPinnedComment && (
+              <div className="rounded-xl border border-border/70 bg-secondary/30 px-4 py-3 text-sm">
+                <p className="text-xs font-medium text-muted-foreground mb-1">고정 댓글</p>
+                <p className="text-foreground whitespace-pre-wrap">{metaPinnedComment}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3 pt-6 border-t border-border/70 mt-6">
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={!videoUrl || isDownloading}
+            className="ui-btn ui-btn--primary"
+          >
+            {isDownloading ? <><Loader2 size={14} className="animate-spin" /> 다운로드 중...</> : <><Download size={14} /> 영상 다운로드</>}
+          </button>
+          {setCurrentStep && (
+            <button
+              type="button"
+              onClick={() => setCurrentStep(8)}
+              className="ui-btn ui-btn--secondary"
+            >
+              썸네일로 돌아가기
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -2553,6 +2684,7 @@ const ThumbnailStep = ({ showToast }: { showToast: (msg: string) => void }) => {
 // --- [메인 레이아웃 쉘] ---
 const AppContent = ({ projectName }: { projectName: string }) => {
   const {
+    sessionId,
     currentStep, setCurrentStep, isLoading, loadingMessage, setDescriptionInput, setIsFileLoaded, isDevMode, setIsDevMode,
     videoFormat, setVideoFormat, scriptStyle, setScriptStyle, planningData, setPlanningData,
     selectedStyle, setSelectedStyle, selectedVoicePresetId, setSelectedVoicePresetId,
@@ -2560,7 +2692,12 @@ const AppContent = ({ projectName }: { projectName: string }) => {
   } = useGlobal();
   const [toast, setToast] = useState<string | null>(null);
   const [isGlobalDragging, setIsGlobalDragging] = useState(false);
+  const [showPresetSaveDialog, setShowPresetSaveDialog] = useState(false);
   const PRESET_KEY = 'weav_studio_presets_v1';
+  const selectedPresetStorageKey = useMemo(
+    () => `weav_studio_selected_preset_id_v1${sessionId != null ? `_${sessionId}` : ''}`,
+    [sessionId]
+  );
   type StudioPreset = {
     id: string;
     name: string;
@@ -2584,7 +2721,29 @@ const AppContent = ({ projectName }: { projectName: string }) => {
       return [];
     }
   });
-  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
+  const [selectedPresetId, setSelectedPresetIdState] = useState<string>(() => {
+    try {
+      const key = `weav_studio_selected_preset_id_v1${sessionId != null ? `_${sessionId}` : ''}`;
+      const raw = localStorage.getItem(PRESET_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : [];
+      const saved = localStorage.getItem(key);
+      const id = typeof saved === 'string' ? saved : '';
+      if (id && list.some((p: StudioPreset) => p.id === id)) return id;
+      return '';
+    } catch {
+      return '';
+    }
+  });
+
+  const setSelectedPresetId = useCallback((id: string) => {
+    setSelectedPresetIdState(id);
+    try {
+      localStorage.setItem(selectedPresetStorageKey, id);
+    } catch {
+      /* ignore */
+    }
+  }, [selectedPresetStorageKey]);
 
   const showToast = useCallback((msg: string) => { 
     setToast(msg); 
@@ -2601,8 +2760,11 @@ const AppContent = ({ projectName }: { projectName: string }) => {
   };
 
   const handleSavePreset = () => {
-    const name = window.prompt('프리셋 이름을 입력하세요', `내 프리셋 ${presets.length + 1}`);
-    if (!name) return;
+    setShowPresetSaveDialog(true);
+  };
+
+  const confirmSavePreset = (name: string) => {
+    setShowPresetSaveDialog(false);
     const preset: StudioPreset = {
       id: `preset-${Date.now()}`,
       name: name.trim().slice(0, 48) || `내 프리셋 ${presets.length + 1}`,
@@ -2669,7 +2831,8 @@ const AppContent = ({ projectName }: { projectName: string }) => {
     { id: 5, label: '음성', icon: <Mic2 size={14}/> },
     { id: 6, label: '영상', icon: <Video size={14}/> },
     { id: 7, label: '메타', icon: <Monitor size={14}/> },
-    { id: 8, label: '썸네일', icon: <ImageIcon size={14}/> }
+    { id: 8, label: '썸네일', icon: <ImageIcon size={14}/> },
+    { id: 9, label: '미리보기', icon: <Film size={14}/> }
   ];
 
   return (
@@ -2695,6 +2858,18 @@ const AppContent = ({ projectName }: { projectName: string }) => {
           </div>
         </div>
       )}
+
+      <InputDialog
+        open={showPresetSaveDialog}
+        title="프리셋 저장"
+        message="프리셋 이름을 입력하세요"
+        placeholder={`내 프리셋 ${presets.length + 1}`}
+        defaultValue={`내 프리셋 ${presets.length + 1}`}
+        confirmLabel="저장"
+        cancelLabel="취소"
+        onConfirm={confirmSavePreset}
+        onCancel={() => setShowPresetSaveDialog(false)}
+      />
 
       {isGlobalDragging && (
         <div className="absolute inset-0 z-[90] bg-background/56 backdrop-blur-sm flex items-center justify-center text-foreground text-sm font-medium">
@@ -2767,6 +2942,7 @@ const AppContent = ({ projectName }: { projectName: string }) => {
           {currentStep === 6 && <VideoStep showToast={showToast} />}
           {currentStep === 7 && <MetaStep showToast={showToast} />}
           {currentStep === 8 && <ThumbnailStep showToast={showToast} />}
+          {currentStep === 9 && <PreviewStep showToast={showToast} />}
         </div>
       </main>
       
