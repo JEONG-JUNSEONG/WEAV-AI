@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.test import TestCase, Client
-from apps.chats.models import Session, Job, Message, Document, SESSION_KIND_CHAT, SESSION_KIND_IMAGE
+from apps.chats.models import Session, Job, Message, ImageRecord, Document, SESSION_KIND_CHAT, SESSION_KIND_IMAGE
 from apps.chats.tasks import process_pdf_document, update_document_progress
 
 
@@ -179,6 +179,190 @@ class ChatPermissionAPITests(TestCase):
         self.assertEqual(cancel_response.json().get('detail'), 'Permission denied')
         mock_revoke.assert_not_called()
 
+    def test_job_cancel_updates_job_status_when_revoked(self):
+        job = Job.objects.create(
+            session=self.chat_session,
+            kind='chat',
+            status='running',
+            task_id='running-task-id',
+            result={'step': 'working'},
+        )
+        self.client.force_login(self.owner)
+
+        with patch('celery.current_app.control.revoke') as mock_revoke:
+            response = self.client.post(f'/api/v1/chat/job/{job.task_id}/cancel/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get('status'), 'cancelled')
+        mock_revoke.assert_called_once_with(job.task_id, terminate=True)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'failure')
+        self.assertEqual(job.error_message, 'cancelled')
+        self.assertEqual(job.result, {})
+
+
+class ChatCompletionAPITests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.session = Session.objects.create(kind=SESSION_KIND_CHAT, title='빈 채팅')
+
+    def test_complete_chat_creates_message_job_and_updates_first_title(self):
+        with patch('apps.ai.tasks.task_chat.delay') as mock_delay:
+            mock_delay.return_value.id = 'chat-task-id'
+            response = self.client.post(
+                '/api/v1/chat/complete/',
+                data={
+                    'session_id': self.session.id,
+                    'prompt': '첫 질문입니다',
+                    'model': 'google/gemini-2.5-flash',
+                },
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 202)
+        data = response.json()
+
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.title, '첫 질문입니다')
+
+        user_msg = Message.objects.get(pk=data['message_id'])
+        self.assertEqual(user_msg.session_id, self.session.id)
+        self.assertEqual(user_msg.role, 'user')
+        self.assertEqual(user_msg.content, '첫 질문입니다')
+
+        job = Job.objects.get(pk=data['job_id'])
+        self.assertEqual(job.session_id, self.session.id)
+        self.assertEqual(job.kind, 'chat')
+        self.assertEqual(job.task_id, 'chat-task-id')
+        self.assertEqual(job.status, 'pending')
+
+    def test_complete_chat_requires_session_id(self):
+        response = self.client.post(
+            '/api/v1/chat/complete/',
+            data={'prompt': '안녕', 'model': 'google/gemini-2.5-flash'},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('session_id', response.json().get('detail', ''))
+
+
+class RegenerateAPITests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.session = Session.objects.create(kind=SESSION_KIND_CHAT, title='재생성 채팅')
+        self.image_session = Session.objects.create(kind=SESSION_KIND_IMAGE, title='재생성 이미지')
+
+    def test_regenerate_chat_preserves_messages_when_queue_fails(self):
+        user_msg = Message.objects.create(session=self.session, role='user', content='첫 질문')
+        assistant_msg = Message.objects.create(session=self.session, role='assistant', content='첫 답변')
+
+        with patch('apps.ai.tasks.task_chat.delay', side_effect=RuntimeError('broker down')):
+            response = self.client.post(
+                '/api/v1/chat/regenerate/',
+                data={'session_id': self.session.id},
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertTrue(Message.objects.filter(pk=user_msg.id).exists())
+        self.assertTrue(Message.objects.filter(pk=assistant_msg.id).exists())
+        self.assertEqual(Job.objects.filter(session=self.session, kind='chat').count(), 1)
+
+        job = Job.objects.get(session=self.session, kind='chat')
+        self.assertEqual(job.status, 'failure')
+        self.assertEqual(job.error_message, 'broker down')
+
+    def test_regenerate_chat_replaces_last_turn_after_queue_success(self):
+        old_user = Message.objects.create(session=self.session, role='user', content='이전 질문')
+        old_assistant = Message.objects.create(session=self.session, role='assistant', content='이전 답변')
+
+        with patch('apps.ai.tasks.task_chat.delay') as mock_delay:
+            mock_delay.return_value.id = 'regen-chat-task'
+            response = self.client.post(
+                '/api/v1/chat/regenerate/',
+                data={'session_id': self.session.id, 'prompt': '새 질문'},
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 202)
+        data = response.json()
+        self.assertFalse(Message.objects.filter(pk=old_user.id).exists())
+        self.assertFalse(Message.objects.filter(pk=old_assistant.id).exists())
+
+        new_user = Message.objects.get(pk=data['message_id'])
+        self.assertEqual(new_user.role, 'user')
+        self.assertEqual(new_user.content, '새 질문')
+
+        job = Job.objects.get(pk=data['job_id'])
+        self.assertEqual(job.task_id, 'regen-chat-task')
+        self.assertEqual(job.status, 'pending')
+
+    def test_regenerate_image_preserves_record_when_queue_fails(self):
+        record = ImageRecord.objects.create(
+            session=self.image_session,
+            prompt='old prompt',
+            image_url='https://example.com/old.png',
+            model='fal-ai/imagen4/preview',
+        )
+
+        with patch('apps.ai.tasks.task_image.delay', side_effect=RuntimeError('broker down')):
+            response = self.client.post(
+                '/api/v1/chat/image/regenerate/',
+                data={'session_id': self.image_session.id},
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertTrue(ImageRecord.objects.filter(pk=record.id).exists())
+        job = Job.objects.get(session=self.image_session, kind='image')
+        self.assertEqual(job.status, 'failure')
+        self.assertEqual(job.error_message, 'broker down')
+
+    def test_regenerate_image_replaces_record_after_queue_success(self):
+        record = ImageRecord.objects.create(
+            session=self.image_session,
+            prompt='old prompt',
+            image_url='https://example.com/old.png',
+            model='fal-ai/imagen4/preview',
+        )
+
+        with patch('apps.ai.tasks.task_image.delay') as mock_delay:
+            mock_delay.return_value.id = 'regen-image-task'
+            response = self.client.post(
+                '/api/v1/chat/image/regenerate/',
+                data={'session_id': self.image_session.id, 'prompt': 'new prompt'},
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertFalse(ImageRecord.objects.filter(pk=record.id).exists())
+        job = Job.objects.get(pk=response.json()['job_id'])
+        self.assertEqual(job.task_id, 'regen-image-task')
+        self.assertEqual(job.status, 'pending')
+
+    def test_regenerate_chat_requires_user_assistant_pair(self):
+        Message.objects.create(session=self.session, role='user', content='첫 질문만 있음')
+
+        response = self.client.post(
+            '/api/v1/chat/regenerate/',
+            data={'session_id': self.session.id},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Need at least one user and one assistant message', response.json().get('detail', ''))
+
+    def test_regenerate_image_requires_existing_record(self):
+        response = self.client.post(
+            '/api/v1/chat/image/regenerate/',
+            data={'session_id': self.image_session.id},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('No image to regenerate', response.json().get('detail', ''))
+
 
 class DocumentUploadAPITests(TestCase):
     def setUp(self):
@@ -222,6 +406,32 @@ class DocumentUploadAPITests(TestCase):
         self.assertEqual(data[0]['total_pages'], 12)
         self.assertEqual(data[0]['processed_pages'], 3)
         self.assertEqual(data[0]['progress_label'], '3 / 12 페이지 텍스트 추출 중')
+
+    def test_session_document_delete_keeps_session_accessible_and_clears_documents(self):
+        doc = Document.objects.create(
+            session=self.session,
+            file_name='1/sample.pdf',
+            original_name='sample.pdf',
+            file_url='http://example.com/sample.pdf',
+            status=Document.STATUS_COMPLETED,
+        )
+
+        with patch('apps.chats.views.minio_client') as mock_storage, \
+             patch('apps.chats.views.ChatMemory.objects.filter') as mock_filter:
+            mock_filter.return_value.delete.return_value = (0, {})
+            delete_response = self.client.delete(f'/api/v1/sessions/{self.session.id}/documents/{doc.id}/')
+
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(Document.objects.filter(pk=doc.id).exists())
+        mock_storage.delete_file.assert_called_once_with(doc.file_name)
+        mock_filter.assert_called_once_with(session_id=self.session.id, metadata__document_id=doc.id)
+
+        session_response = self.client.get(f'/api/v1/sessions/{self.session.id}/')
+        self.assertEqual(session_response.status_code, 200)
+
+        documents_response = self.client.get(f'/api/v1/sessions/{self.session.id}/documents/')
+        self.assertEqual(documents_response.status_code, 200)
+        self.assertEqual(documents_response.json(), [])
 
 
 class DocumentProcessingTaskTests(TestCase):
