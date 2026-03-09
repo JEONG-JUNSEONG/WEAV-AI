@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from django.http import Http404
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -257,18 +258,27 @@ def regenerate_chat(request):
         prompt = str(prompt).strip()[:10000]
     model = request.data.get('model') or 'google/gemini-2.5-flash'
     system_prompt = request.data.get('system_prompt')
-    last_user.delete()
-    last_assistant.delete()
-    user_msg = Message.objects.create(session=session, role='user', content=prompt)
     job = Job.objects.create(session=session, kind='chat', status='pending')
-    task = tasks.task_chat.delay(
-        job.id,
-        prompt=prompt,
-        model=normalize_chat_model(model),
-        system_prompt=system_prompt,
-    )
-    job.task_id = task.id
-    job.save(update_fields=['task_id'])
+    try:
+        task = tasks.task_chat.delay(
+            job.id,
+            prompt=prompt,
+            model=normalize_chat_model(model),
+            system_prompt=system_prompt,
+        )
+    except Exception as e:
+        job.status = 'failure'
+        job.error_message = str(e)
+        job.save(update_fields=['status', 'error_message', 'updated_at'])
+        logging.getLogger(__name__).exception("regenerate_chat queue error")
+        return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    with transaction.atomic():
+        last_user.delete()
+        last_assistant.delete()
+        user_msg = Message.objects.create(session=session, role='user', content=prompt)
+        job.task_id = task.id
+        job.save(update_fields=['task_id'])
     return Response({
         'task_id': task.id,
         'job_id': job.id,
@@ -295,20 +305,29 @@ def regenerate_image(request):
     else:
         prompt = str(prompt).strip()[:10000]
     model = request.data.get('model') or last_record.model
-    last_record.delete()
     job = Job.objects.create(session=session, kind='image', status='pending')
-    task = tasks.task_image.delay(
-        job.id,
-        prompt=prompt,
-        model=model,
-        aspect_ratio=request.data.get('aspect_ratio') or '1:1',
-        num_images=1,
-        resolution=request.data.get('resolution'),
-        output_format=request.data.get('output_format'),
-        seed=request.data.get('seed'),
-    )
-    job.task_id = task.id
-    job.save(update_fields=['task_id'])
+    try:
+        task = tasks.task_image.delay(
+            job.id,
+            prompt=prompt,
+            model=model,
+            aspect_ratio=request.data.get('aspect_ratio') or '1:1',
+            num_images=1,
+            resolution=request.data.get('resolution'),
+            output_format=request.data.get('output_format'),
+            seed=request.data.get('seed'),
+        )
+    except Exception as e:
+        job.status = 'failure'
+        job.error_message = str(e)
+        job.save(update_fields=['status', 'error_message', 'updated_at'])
+        logging.getLogger(__name__).exception("regenerate_image queue error")
+        return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    with transaction.atomic():
+        last_record.delete()
+        job.task_id = task.id
+        job.save(update_fields=['task_id'])
     return Response({
         'task_id': task.id,
         'job_id': job.id,
@@ -321,7 +340,13 @@ def job_cancel(request, task_id):
     if denied:
         return denied
     from celery import current_app
-    current_app.control.revoke(job.task_id, terminate=True)
+    if job.task_id:
+        current_app.control.revoke(job.task_id, terminate=True)
+    if job.status not in ('success', 'failure'):
+        job.status = 'failure'
+        job.error_message = 'cancelled'
+        job.result = {}
+        job.save(update_fields=['status', 'error_message', 'result', 'updated_at'])
     return Response({'status': 'cancelled'}, status=status.HTTP_200_OK)
 
 

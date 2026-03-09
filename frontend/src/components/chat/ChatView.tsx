@@ -63,6 +63,13 @@ export function ChatView() {
     nearBottomRef.current = distance < 180;
   }, []);
 
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    nearBottomRef.current = true;
+    requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ behavior, block: 'end' });
+    });
+  }, []);
+
   useEffect(() => {
     // Only auto-scroll when the user is already near the bottom.
     const el = scrollRef.current;
@@ -426,6 +433,7 @@ export function ChatView() {
       <ChatInput
         rightOffset={rightOffset}
         onHeightChange={setInputAreaHeight}
+        onSubmitStart={() => scrollToLatest('smooth')}
       />
       {isChat && !showImageContent && currentSession && (
         <DocumentPanel

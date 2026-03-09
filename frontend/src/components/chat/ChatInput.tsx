@@ -26,9 +26,11 @@ import { getImageModelGuide } from './imageModelGuide';
 export function ChatInput({
   rightOffset = 0,
   onHeightChange,
+  onSubmitStart,
 }: {
   rightOffset?: number;
   onHeightChange?: (height: number) => void;
+  onSubmitStart?: () => void;
 }) {
   const { currentSession } = useApp();
   const {
@@ -247,6 +249,7 @@ export function ChatInput({
       }
     }
 
+    onSubmitStart?.();
     setPrompt('');
     setMentionOpen(false);
     if (isRegenerateMode && currentSession) {
@@ -440,7 +443,7 @@ export function ChatInput({
   return (
       <div
         ref={containerRef}
-        className={`fixed bottom-0 right-0 p-4 transition-[left] duration-300 ease-out ${
+        className={`fixed bottom-0 right-0 p-4 transition-[left,right] duration-200 ease-out ${
           sidebarOpen ? 'left-72' : 'left-0'
         }`}
         style={rightOffset > 0 ? { right: rightOffset } : undefined}
