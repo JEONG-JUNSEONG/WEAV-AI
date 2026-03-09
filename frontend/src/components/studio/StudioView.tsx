@@ -29,6 +29,7 @@ import {
 	import { studioTts, studioImage, studioBgRemove, uploadStudioReferenceImage, studioExport, studioExportJobStatus, studioExportJobCancel } from '@/services/studio/studioFalApi';
 import { fetchTrendingByCategory, formatTrendingGrowth, type TrendingItemWithCategory } from '@/services/studio/trendingApi';
 import { InputDialog } from '@/components/ui/InputDialog';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 // --- [전역 상태 관리] ---
 const GlobalContext = createContext<StudioGlobalContextType | undefined>(undefined);
@@ -3518,6 +3519,7 @@ const AppContent = ({ projectName }: { projectName: string }) => {
       return '';
     }
   });
+  const [showPresetDeleteConfirm, setShowPresetDeleteConfirm] = useState(false);
 
   const setSelectedPresetId = useCallback((id: string) => {
     setSelectedPresetIdState(id);
@@ -3583,10 +3585,19 @@ const AppContent = ({ projectName }: { projectName: string }) => {
   const handleDeletePreset = () => {
     const p = presets.find(x => x.id === selectedPresetId);
     if (!p) return;
-    if (!window.confirm(`프리셋 "${p.name}"을 삭제할까요?`)) return;
+    setShowPresetDeleteConfirm(true);
+  };
+
+  const confirmDeletePreset = () => {
+    const p = presets.find(x => x.id === selectedPresetId);
+    if (!p) {
+      setShowPresetDeleteConfirm(false);
+      return;
+    }
     const next = presets.filter(x => x.id !== selectedPresetId);
     persistPresets(next);
     setSelectedPresetId('');
+    setShowPresetDeleteConfirm(false);
     showToast('프리셋이 삭제되었습니다.');
   };
 
@@ -3653,6 +3664,20 @@ const AppContent = ({ projectName }: { projectName: string }) => {
         cancelLabel="취소"
         onConfirm={confirmSavePreset}
         onCancel={() => setShowPresetSaveDialog(false)}
+      />
+      <ConfirmDialog
+        open={showPresetDeleteConfirm}
+        title="프리셋 삭제"
+        message={
+          selectedPresetId && presets.find((p) => p.id === selectedPresetId)
+            ? `프리셋 "${presets.find((p) => p.id === selectedPresetId)?.name}"을 삭제할까요?`
+            : ''
+        }
+        confirmLabel="삭제"
+        cancelLabel="취소"
+        variant="destructive"
+        onConfirm={confirmDeletePreset}
+        onCancel={() => setShowPresetDeleteConfirm(false)}
       />
 
       {isGlobalDragging && (

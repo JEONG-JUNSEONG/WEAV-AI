@@ -15,7 +15,18 @@ class DocumentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Document
-        fields = ('id', 'original_name', 'status', 'file_url', 'error_message', 'created_at', 'updated_at')
+        fields = (
+            'id',
+            'original_name',
+            'status',
+            'file_url',
+            'total_pages',
+            'processed_pages',
+            'progress_label',
+            'error_message',
+            'created_at',
+            'updated_at',
+        )
 
     def get_original_name(self, obj):
         return obj.original_name or obj.file_name

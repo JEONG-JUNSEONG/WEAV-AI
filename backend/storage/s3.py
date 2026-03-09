@@ -89,9 +89,31 @@ class MinIOStorage:
         """
         try:
             response = self.client.get_object(Bucket=self.bucket_name, Key=filename)
-            return response['Body'].read()
+            body = response['Body']
+            try:
+                return body.read()
+            finally:
+                body.close()
         except Exception as e:
             logger.error(f"Failed to download {filename} from MinIO: {e}")
+            raise
+
+    def download_file_to_path(self, filename: str, destination_path: str, chunk_size: int = 1024 * 1024):
+        """
+        Streams an object from MinIO directly to a local file path.
+        """
+        try:
+            response = self.client.get_object(Bucket=self.bucket_name, Key=filename)
+            body = response['Body']
+            try:
+                with open(destination_path, 'wb') as destination:
+                    for chunk in body.iter_chunks(chunk_size=chunk_size):
+                        if chunk:
+                            destination.write(chunk)
+            finally:
+                body.close()
+        except Exception as e:
+            logger.error(f"Failed to stream {filename} from MinIO: {e}")
             raise
 
     def get_presigned_url(self, filename: str, expires_in: int = 3600) -> str:
@@ -113,7 +135,7 @@ class MinIOStorage:
         Deletes a file from MinIO.
         """
         try:
-            self.client.delete_object(self.bucket_name, filename)
+            self.client.delete_object(Bucket=self.bucket_name, Key=filename)
         except Exception as e:
             logger.error(f"Failed to delete {filename} from MinIO: {e}")
             raise

@@ -27,6 +27,51 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+def page_ocr_enabled() -> bool:
+    """Gate the slower pytesseract page OCR path behind an env flag."""
+    raw = os.environ.get("DOCUMENT_PAGE_OCR_ENABLED", "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def image_ocr_enabled() -> bool:
+    """Gate the slower external image OCR path behind an env flag."""
+    raw = os.environ.get("DOCUMENT_IMAGE_OCR_ENABLED", "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def update_document_progress(
+    doc_record: Document,
+    *,
+    status: str | None = None,
+    total_pages: int | None = None,
+    processed_pages: int | None = None,
+    progress_label: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    update_fields: list[str] = []
+    if status is not None and doc_record.status != status:
+        doc_record.status = status
+        update_fields.append('status')
+    if total_pages is not None and doc_record.total_pages != total_pages:
+        doc_record.total_pages = total_pages
+        update_fields.append('total_pages')
+    if processed_pages is not None:
+        next_processed_pages = processed_pages
+        if total_pages is not None and total_pages > 0:
+            next_processed_pages = min(next_processed_pages, total_pages)
+        next_processed_pages = max(doc_record.processed_pages, next_processed_pages)
+        if doc_record.processed_pages != next_processed_pages:
+            doc_record.processed_pages = next_processed_pages
+            update_fields.append('processed_pages')
+    if progress_label is not None and doc_record.progress_label != progress_label:
+        doc_record.progress_label = progress_label
+        update_fields.append('progress_label')
+    if error_message is not None and doc_record.error_message != error_message:
+        doc_record.error_message = error_message
+        update_fields.append('error_message')
+    if update_fields:
+        doc_record.save(update_fields=[*update_fields, 'updated_at'])
+
 def convert_to_pdf(input_path: str) -> str:
     """
     Convert a document to PDF using LibreOffice.
@@ -105,42 +150,48 @@ def get_bbox_iou(box1, box2):
         return 0.0
     return intersection_area / union_area
 
-def extract_text_and_bbox_with_pymupdf(doc):
+def extract_text_blocks_from_page(page, page_number: int):
     """
-    Extracts text blocks with their bounding boxes and page numbers using PyMuPDF (fitz).
-    Returns a list of dicts: {'text': str, 'bbox': list, 'page': int, 'source_type': 'parsed'}
+    Extract text blocks from a single PDF page.
     """
     extracted_data = []
     try:
-        for page_num, page in enumerate(doc):
-            page_width = float(page.rect.width)
-            page_height = float(page.rect.height)
-            # "blocks" -> (x0, y0, x1, y1, "lines", block_no, block_type)
-            # block_type=0 is text, block_type=1 is image
-            blocks = page.get_text("blocks")
-            for block in blocks:
-                if block[6] == 0:  # Text block
-                    text = block[4].strip()
-                    if not text:
-                        continue
-                        
-                    bbox = list(block[0:4]) # [x0, y0, x1, y1]
-                    extracted_data.append({
-                        'text': text,
-                        'bbox': bbox,
-                        'page': page_num + 1, # 1-indexed for user friendliness
-                        'source_type': 'parsed',
-                        'page_width': page_width,
-                        'page_height': page_height
-                    })
+        page_width = float(page.rect.width)
+        page_height = float(page.rect.height)
+        blocks = page.get_text("blocks")
+        for block in blocks:
+            if block[6] == 0:
+                text = block[4].strip()
+                if not text:
+                    continue
+                bbox = list(block[0:4])
+                extracted_data.append({
+                    'text': text,
+                    'bbox': bbox,
+                    'page': page_number,
+                    'source_type': 'parsed',
+                    'page_width': page_width,
+                    'page_height': page_height,
+                })
     except Exception as e:
-        logger.error(f"PyMuPDF block extraction failed: {e}")
+        logger.error(f"PyMuPDF page extraction failed on page {page_number}: {e}")
     return extracted_data
 
-def extract_text_and_bbox_with_ocr(doc):
+
+def extract_text_and_bbox_with_pymupdf(doc, progress_callback=None):
     """
-    Extracts text blocks using OCR on page images.
-    Returns a list of dicts: {'text': str, 'bbox': list, 'page': int, 'source_type': 'ocr'}
+    Backward-compatible wrapper that extracts text blocks for the whole document.
+    """
+    extracted_data = []
+    for page_num, page in enumerate(doc):
+        if progress_callback:
+            progress_callback(page_num + 1, "페이지 텍스트 추출 중")
+        extracted_data.extend(extract_text_blocks_from_page(page, page_num + 1))
+    return extracted_data
+
+def extract_ocr_blocks_from_page(page, page_number: int):
+    """
+    Extract OCR blocks from a single PDF page image.
     """
     extracted_data = []
     if not pytesseract or not Image:
@@ -148,59 +199,61 @@ def extract_text_and_bbox_with_ocr(doc):
         return extracted_data
 
     try:
-        for page_num, page in enumerate(doc):
-            page_width = float(page.rect.width)
-            page_height = float(page.rect.height)
-            pix = page.get_pixmap()
-            img_data = pix.tobytes("png")
-            image = Image.open(io.BytesIO(img_data))
-            
-            # Use image_to_data to get boxes
-            ocr_res = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
-            
-            n_boxes = len(ocr_res['text'])
-            
-            # Group by block_num
-            # block_num -> {'text': [], 'bboxes': []}
-            blocks = {} 
-            
-            for i in range(n_boxes):
-                if int(ocr_res['conf'][i]) < 30: # Low confidence filter
-                    continue
-                text = ocr_res['text'][i].strip()
-                if not text:
-                    continue
-                
-                block_num = ocr_res['block_num'][i]
-                x, y, w, h = ocr_res['left'][i], ocr_res['top'][i], ocr_res['width'][i], ocr_res['height'][i]
-                x0, y0, x1, y1 = x, y, x + w, y + h
-                
-                if block_num not in blocks:
-                    blocks[block_num] = {'text': [text], 'bbox': [x0, y0, x1, y1]}
-                else:
-                    blocks[block_num]['text'].append(text)
-                    # Expand bbox to cover all words in block
-                    b = blocks[block_num]['bbox']
-                    blocks[block_num]['bbox'] = [
-                        min(b[0], x0), min(b[1], y0),
-                        max(b[2], x1), max(b[3], y1)
-                    ]
-            
-            for b_id, content in blocks.items():
-                full_text = " ".join(content['text'])
-                if len(full_text) > 3: # Ignore tiny noise
-                    extracted_data.append({
-                        'text': full_text,
-                        'bbox': content['bbox'],
-                        'page': page_num + 1,
-                        'source_type': 'ocr',
-                        'page_width': page_width,
-                        'page_height': page_height
-                    })
+        page_width = float(page.rect.width)
+        page_height = float(page.rect.height)
+        pix = page.get_pixmap()
+        img_data = pix.tobytes("png")
+        image = Image.open(io.BytesIO(img_data))
 
+        ocr_res = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        n_boxes = len(ocr_res['text'])
+        blocks = {}
+
+        for i in range(n_boxes):
+            if int(ocr_res['conf'][i]) < 30:
+                continue
+            text = ocr_res['text'][i].strip()
+            if not text:
+                continue
+
+            block_num = ocr_res['block_num'][i]
+            x, y, w, h = ocr_res['left'][i], ocr_res['top'][i], ocr_res['width'][i], ocr_res['height'][i]
+            x0, y0, x1, y1 = x, y, x + w, y + h
+
+            if block_num not in blocks:
+                blocks[block_num] = {'text': [text], 'bbox': [x0, y0, x1, y1]}
+            else:
+                blocks[block_num]['text'].append(text)
+                b = blocks[block_num]['bbox']
+                blocks[block_num]['bbox'] = [
+                    min(b[0], x0), min(b[1], y0),
+                    max(b[2], x1), max(b[3], y1)
+                ]
+
+        for content in blocks.values():
+            full_text = " ".join(content['text'])
+            if len(full_text) > 3:
+                extracted_data.append({
+                    'text': full_text,
+                    'bbox': content['bbox'],
+                    'page': page_number,
+                    'source_type': 'ocr',
+                    'page_width': page_width,
+                    'page_height': page_height
+                })
     except Exception as e:
-        logger.error(f"OCR extraction failed: {e}")
-    
+        logger.error(f"OCR extraction failed on page {page_number}: {e}")
+
+    return extracted_data
+
+
+def extract_text_and_bbox_with_ocr(doc):
+    """
+    Backward-compatible wrapper that extracts OCR blocks for the whole document.
+    """
+    extracted_data = []
+    for page_num, page in enumerate(doc):
+        extracted_data.extend(extract_ocr_blocks_from_page(page, page_num + 1))
     return extracted_data
 
 def merge_parsed_and_ocr(parsed_data, ocr_data):
@@ -332,62 +385,67 @@ def merge_text_chunks_by_page(chunks, max_chars: int = 450, overlap_chars: int =
 
     return merged
 
-def extract_images_from_pdf(doc, session_id):
+def extract_images_from_page(pdf_doc, page, page_number: int, session_id):
     """
-    Extracts embedded images from PDF pages and uploads to MinIO.
-    Returns list of dicts.
+    Extract embedded images from a single PDF page and upload them.
     """
     extracted_images = []
     if not minio_client:
         return extracted_images
 
-    for page_num, page in enumerate(doc):
-        try:
-            image_list = page.get_images(full=True)
-            page_width = float(page.rect.width)
-            page_height = float(page.rect.height)
+    try:
+        image_list = page.get_images(full=True)
+        page_width = float(page.rect.width)
+        page_height = float(page.rect.height)
 
-            for img_idx, img in enumerate(image_list):
-                xref = img[0]
-                try:
-                    base_image = doc.extract_image(xref)
-                    image_bytes = base_image["image"]
-                    image_ext = base_image["ext"]
-                    
-                    # Get location
-                    rects = page.get_image_rects(xref)
-                    if not rects:
-                        continue
-                    # Rect to list
-                    r = rects[0]
-                    bbox = [r.x0, r.y0, r.x1, r.y1]
+        for img_idx, img in enumerate(image_list):
+            xref = img[0]
+            try:
+                base_image = pdf_doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                image_ext = base_image["ext"]
 
-                    # Filter small icons/noise (e.g. < 50px)
-                    if (bbox[2] - bbox[0] < 50) or (bbox[3] - bbox[1] < 50):
-                        continue
-                    
-                    # Upload
-                    filename = f"images/{session_id}/{page_num+1}_{img_idx}.{image_ext}"
-                    file_obj = io.BytesIO(image_bytes)
-                    
-                    url = minio_client.upload_file(file_obj, filename, content_type=f"image/{image_ext}")
-                    
-                    extracted_images.append({
-                        'text': '', 
-                        'bbox': bbox,
-                        'page': page_num + 1,
-                        'source_type': 'image_ocr',
-                        'image_url': url,
-                        'page_width': page_width,
-                        'page_height': page_height,
-                        'is_image_ocr': True
-                    })
-                except Exception as e:
-                    logger.warning(f"Image extraction error on page {page_num}: {e}")
+                rects = page.get_image_rects(xref)
+                if not rects:
                     continue
-        except Exception as e:
-             logger.error(f"Failed to get images from page {page_num}: {e}")
+                r = rects[0]
+                bbox = [r.x0, r.y0, r.x1, r.y1]
 
+                if (bbox[2] - bbox[0] < 50) or (bbox[3] - bbox[1] < 50):
+                    continue
+
+                filename = f"images/{session_id}/{page_number}_{img_idx}.{image_ext}"
+                file_obj = io.BytesIO(image_bytes)
+                url = minio_client.upload_file(file_obj, filename, content_type=f"image/{image_ext}")
+
+                extracted_images.append({
+                    'text': '',
+                    'bbox': bbox,
+                    'page': page_number,
+                    'source_type': 'image_ocr',
+                    'image_url': url,
+                    'page_width': page_width,
+                    'page_height': page_height,
+                    'is_image_ocr': True
+                })
+            except Exception as e:
+                logger.warning(f"Image extraction error on page {page_number}: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"Failed to get images from page {page_number}: {e}")
+
+    return extracted_images
+
+
+def extract_images_from_pdf(doc, session_id, progress_callback=None):
+    """
+    Backward-compatible wrapper that extracts images for the whole document.
+    """
+    extracted_images = []
+    for page_num, page in enumerate(doc):
+        if progress_callback:
+            progress_callback(page_num + 1, "페이지 이미지 추출 중")
+        extracted_images.extend(extract_images_from_page(doc, page, page_num + 1, session_id))
     return extracted_images
 
 @shared_task(bind=True, max_retries=3)
@@ -397,26 +455,25 @@ def process_pdf_document(self, document_id):
     converted_dir = None
     try:
         doc_record = Document.objects.get(id=document_id)
-        doc_record.status = Document.STATUS_PROCESSING
-        doc_record.save()
+        update_document_progress(
+            doc_record,
+            status=Document.STATUS_PROCESSING,
+            processed_pages=0,
+            progress_label='문서 준비 중',
+            error_message='',
+        )
 
-        # 1. Download Content
-        content_bytes = None
-        if minio_client:
-            content_bytes = minio_client.get_file_content(doc_record.file_name)
-        else:
-             logger.warning("minio_client not available, cannot download file content.")
-             pass    
-
-        if not content_bytes:
-             raise Exception("Failed to retrieve file content from MinIO")
-
-        # Save to temp file for processing
         original_name = doc_record.original_name or doc_record.file_name
         original_ext = os.path.splitext(original_name)[1].lower()
         with tempfile.NamedTemporaryFile(delete=False, suffix=original_ext or ".pdf") as tmp:
-            tmp.write(content_bytes)
             tmp_path = tmp.name
+
+        # 1. Download Content
+        if minio_client:
+            minio_client.download_file_to_path(doc_record.file_name, tmp_path)
+        else:
+            logger.warning("minio_client not available, cannot download file content.")
+            raise Exception("Failed to retrieve file content from MinIO")
 
         pdf_path = tmp_path
         if original_ext in ('.hwp', '.hwpx'):
@@ -429,103 +486,130 @@ def process_pdf_document(self, document_id):
             doc_record.save(update_fields=['pdf_file_name'])
             pdf_path = converted_pdf_path
 
-        # 2. Extract & Merge
-        # We need to open the PDF file with fitz
+        # 2. Extract & index page-by-page to keep memory bounded.
         pdf_doc = fitz.open(pdf_path)
+        total_pages = getattr(pdf_doc, 'page_count', None) or len(pdf_doc)
+        update_document_progress(
+            doc_record,
+            total_pages=total_pages,
+            processed_pages=0,
+            progress_label=f"0 / {total_pages} 페이지 준비 중",
+        )
         
         logger.info(f"Starting extraction for doc {document_id}")
+        page_ocr = page_ocr_enabled()
+        image_ocr = image_ocr_enabled()
 
-        # A. Parse Text + BBox
-        parsed_chunks = extract_text_and_bbox_with_pymupdf(pdf_doc)
-        logger.info(f"Parsed {len(parsed_chunks)} text blocks.")
-        
-        # A-2. Extract Images & OCR
-        image_chunks = extract_images_from_pdf(pdf_doc, doc_record.session_id)
-        logger.info(f"Extracted {len(image_chunks)} images.")
-        
-        chat_service = ChatMemoryService()
-        valid_image_chunks = []
-        for img in image_chunks:
-            # Call Fal.ai OCR
-            if img.get('image_url'):
-                extracted_text = chat_service.ocr_image_with_fal(img['image_url'])
-                if extracted_text and len(extracted_text.strip()) > 5:
-                    img['text'] = extracted_text.strip()
-                    img['source_type'] = 'image_ocr' # ensure type
-                    valid_image_chunks.append(img)
-        
-        
-        logger.info(f"OCR processed {len(valid_image_chunks)} images with text.")
-        # Do not merge image text with normal text to preserve image_url metadata
-        # parsed_chunks.extend(valid_image_chunks) 
-        
-        # B. OCR Text + BBox
-        ocr_chunks = extract_text_and_bbox_with_ocr(pdf_doc)
-        logger.info(f"OCR extracted {len(ocr_chunks)} blocks.")
-        
-        # C. Merge
-        final_chunks = merge_parsed_and_ocr(parsed_chunks, ocr_chunks)
-        logger.info(f"Final merged chunks: {len(final_chunks)}")
-        final_chunks = merge_text_chunks_by_page(final_chunks)
-        # Add image chunks as distinct items
-        final_chunks.extend(valid_image_chunks)
-        logger.info(f"Merged paragraph chunks + images: {len(final_chunks)}")
-        
-        if not final_chunks:
-            # Fallback if both failed (e.g. empty scan without OCR setup)
+        def mark_page_progress(page_number: int, phase: str):
+            capped_page = max(0, min(page_number, total_pages))
+            update_document_progress(
+                doc_record,
+                total_pages=total_pages,
+                processed_pages=capped_page,
+                progress_label=f"{capped_page} / {total_pages} {phase}",
+            )
+        service = ChatMemoryService()
+        if not image_ocr:
+            logger.info("Image OCR disabled; skipping external image OCR.")
+        if not page_ocr:
+            logger.info("Page OCR disabled; skipping pytesseract OCR.")
+
+        indexed_chunk_count = 0
+        for page_index in range(total_pages):
+            page_number = page_index + 1
+            page = pdf_doc.load_page(page_index)
+
+            mark_page_progress(page_number, "페이지 텍스트 추출 중")
+            parsed_chunks = extract_text_blocks_from_page(page, page_number)
+
+            valid_image_chunks = []
+            if image_ocr:
+                mark_page_progress(page_number, "페이지 이미지 추출 중")
+                image_chunks = extract_images_from_page(pdf_doc, page, page_number, doc_record.session_id)
+                for img in image_chunks:
+                    if img.get('image_url'):
+                        mark_page_progress(page_number, "페이지 이미지 OCR 중")
+                        extracted_text = service.ocr_image_with_fal(img['image_url'])
+                        if extracted_text and len(extracted_text.strip()) > 5:
+                            img['text'] = extracted_text.strip()
+                            img['source_type'] = 'image_ocr'
+                            valid_image_chunks.append(img)
+
+            ocr_chunks = []
+            if page_ocr:
+                mark_page_progress(page_number, "페이지 OCR 중")
+                ocr_chunks = extract_ocr_blocks_from_page(page, page_number)
+
+            final_chunks = merge_parsed_and_ocr(parsed_chunks, ocr_chunks)
+            final_chunks = merge_text_chunks_by_page(final_chunks)
+            final_chunks.extend(valid_image_chunks)
+
+            if not final_chunks:
+                continue
+
+            mark_page_progress(page_number, "페이지 인덱싱 중")
+            for chunk in final_chunks:
+                content_text = chunk['text']
+                page_width = chunk.get('page_width') or 1.0
+                page_height = chunk.get('page_height') or 1.0
+                bbox = chunk['bbox']
+                bbox_norm = [
+                    bbox[0] / page_width,
+                    bbox[1] / page_height,
+                    bbox[2] / page_width,
+                    bbox[3] / page_height,
+                ]
+
+                meta = {
+                    'source': 'pdf',
+                    'document_id': doc_record.id,
+                    'filename': doc_record.original_name or doc_record.file_name,
+                    'page': chunk['page'],
+                    'bbox': bbox,
+                    'bbox_norm': bbox_norm,
+                    'page_width': page_width,
+                    'page_height': page_height,
+                    'source_type': chunk.get('source_type', 'unknown'),
+                    'image_url': chunk.get('image_url'),
+                    'is_image_ocr': chunk.get('is_image_ocr', False)
+                }
+
+                service.add_memory(
+                    session_id=doc_record.session_id,
+                    content=content_text,
+                    metadata=meta
+                )
+                indexed_chunk_count += 1
+
+        if indexed_chunk_count == 0:
             logger.warning(f"No text extracted from {doc_record.file_name}")
-            doc_record.status = Document.STATUS_FAILED
-            doc_record.error_message = "No text extracted (Parsed + OCR both empty)."
-            doc_record.save()
+            update_document_progress(
+                doc_record,
+                status=Document.STATUS_FAILED,
+                progress_label='실패',
+                error_message="No text extracted (Parsed + OCR both empty).",
+            )
             return
 
-        # 3. Indexing
-        service = ChatMemoryService()
-        
-        for i, chunk in enumerate(final_chunks):
-            content_text = chunk['text']
-            page_width = chunk.get('page_width') or 1.0
-            page_height = chunk.get('page_height') or 1.0
-            bbox = chunk['bbox']
-            bbox_norm = [
-                bbox[0] / page_width,
-                bbox[1] / page_height,
-                bbox[2] / page_width,
-                bbox[3] / page_height,
-            ]
-            
-            # Metadata construction with bbox and page
-            meta = {
-                'source': 'pdf',
-                'document_id': doc_record.id,
-                'filename': doc_record.original_name or doc_record.file_name,
-                'page': chunk['page'],
-                'bbox': bbox,
-                'bbox_norm': bbox_norm,
-                'page_width': page_width,
-                'page_height': page_height,
-                'source_type': chunk.get('source_type', 'unknown'),
-                'image_url': chunk.get('image_url'),
-                'is_image_ocr': chunk.get('is_image_ocr', False)
-            }
-            
-            service.add_memory(
-                session_id=doc_record.session_id,
-                content=content_text,
-                metadata=meta
-            )
-            
-        doc_record.status = Document.STATUS_COMPLETED
-        doc_record.save()
+        update_document_progress(
+            doc_record,
+            status=Document.STATUS_COMPLETED,
+            total_pages=total_pages,
+            processed_pages=total_pages,
+            progress_label='완료',
+        )
         
     except Exception as e:
         logger.error(f"Error processing document {document_id}: {e}", exc_info=True)
         try:
             # Re-fetch in case transaction failed or stale
             doc_record = Document.objects.get(id=document_id)
-            doc_record.status = Document.STATUS_FAILED
-            doc_record.error_message = str(e)
-            doc_record.save()
+            update_document_progress(
+                doc_record,
+                status=Document.STATUS_FAILED,
+                progress_label='실패',
+                error_message=str(e),
+            )
         except:
             pass
     finally:
