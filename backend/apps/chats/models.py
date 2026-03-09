@@ -87,6 +87,9 @@ class Document(models.Model):
     original_name = models.CharField(max_length=255, blank=True, default='')
     file_url = models.URLField(max_length=2048)  # MinIO URL
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    total_pages = models.PositiveIntegerField(default=0)
+    processed_pages = models.PositiveIntegerField(default=0)
+    progress_label = models.CharField(max_length=255, blank=True, default='')
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

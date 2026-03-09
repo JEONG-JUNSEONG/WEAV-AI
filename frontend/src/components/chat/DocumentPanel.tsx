@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Upload, FileText, Trash2 } from 'lucide-react';
 import type { Citation, DocumentItem } from '@/types';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker?url';
 
@@ -225,6 +226,7 @@ export function DocumentPanel({
   const [pageCount, setPageCount] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
   const [resizing, setResizing] = useState(false);
+  const [pendingDeleteDoc, setPendingDeleteDoc] = useState<DocumentItem | null>(null);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
 
   const formatDocTime = (value: string) => {
@@ -236,6 +238,31 @@ export function DocumentPanel({
     const hh = String(date.getHours()).padStart(2, '0');
     const min = String(date.getMinutes()).padStart(2, '0');
     return `${yy}-${mm}-${dd} ${hh}:${min}`;
+  };
+
+  const getDocumentStatusText = (doc: DocumentItem) => {
+    if (doc.status === 'completed') return '완료';
+    if (doc.status === 'failed') return '실패';
+    if (doc.status === 'pending') return '대기 중';
+    return '처리 중';
+  };
+
+  const getDocumentProgressText = (doc: DocumentItem) => {
+    if (doc.status !== 'processing') return '';
+    if (doc.progress_label?.trim()) return doc.progress_label.trim();
+    if ((doc.total_pages ?? 0) > 0) {
+      return `${Math.min(doc.processed_pages ?? 0, doc.total_pages ?? 0)} / ${doc.total_pages} 페이지 처리 중`;
+    }
+    return '문서 처리 중';
+  };
+
+  const getDocumentProgressPercent = (doc: DocumentItem) => {
+    if (doc.status === 'completed') return 100;
+    if (doc.status !== 'processing') return 0;
+    const total = doc.total_pages ?? 0;
+    if (total <= 0) return 0;
+    const processed = Math.min(doc.processed_pages ?? 0, total);
+    return Math.max(0, Math.min(100, (processed / total) * 100));
   };
 
   const activeCitation = citations && citations.length > 0 ? citations[activeCitationIndex] : null;
@@ -264,7 +291,7 @@ export function DocumentPanel({
     if (!open) return;
     const hasPending = documents.some((d) => d.status === 'pending' || d.status === 'processing');
     if (!hasPending) return;
-    const id = setInterval(() => onRefresh(), 3000);
+    const id = setInterval(() => onRefresh(), 1000);
     return () => clearInterval(id);
   }, [documents, onRefresh, open]);
 
@@ -297,6 +324,19 @@ export function DocumentPanel({
 
   return (
     <>
+      <ConfirmDialog
+        open={pendingDeleteDoc != null}
+        title="문서 삭제"
+        message={pendingDeleteDoc ? `'${pendingDeleteDoc.original_name}' 문서를 삭제할까요?` : ''}
+        confirmLabel="삭제"
+        cancelLabel="취소"
+        variant="destructive"
+        onConfirm={() => {
+          if (pendingDeleteDoc) onDelete(pendingDeleteDoc.id);
+          setPendingDeleteDoc(null);
+        }}
+        onCancel={() => setPendingDeleteDoc(null)}
+      />
       {!open && showTrigger && (
         <button
           type="button"
@@ -400,19 +440,13 @@ export function DocumentPanel({
                           <span className="font-medium text-foreground truncate">{doc.original_name}</span>
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] text-muted-foreground">
-                              {doc.status === 'completed'
-                                ? '완료'
-                                : doc.status === 'failed'
-                                  ? '실패'
-                                  : '처리 중'}
+                              {getDocumentStatusText(doc)}
                             </span>
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (window.confirm(`'${doc.original_name}' 문서를 삭제할까요?`)) {
-                                  onDelete(doc.id);
-                                }
+                                setPendingDeleteDoc(doc);
                               }}
                               className="rounded p-1 text-muted-foreground hover:text-rose-500"
                               aria-label="문서 삭제"
@@ -425,6 +459,17 @@ export function DocumentPanel({
                         <div className="mt-1 text-[10px] text-muted-foreground">
                           {formatDocTime(doc.created_at)}
                         </div>
+                        {getDocumentProgressText(doc) && (
+                          <p className="mt-1 text-[10px] text-muted-foreground">{getDocumentProgressText(doc)}</p>
+                        )}
+                        {doc.status === 'processing' && (
+                          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+                              style={{ width: `${getDocumentProgressPercent(doc)}%` }}
+                            />
+                          </div>
+                        )}
                         {doc.error_message && doc.status === 'failed' && (
                           <p className="mt-1 text-[10px] text-rose-500">{doc.error_message}</p>
                         )}
@@ -508,7 +553,7 @@ export function DocumentPanel({
                   />
                 ) : (
                   <div className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
-                    문서 처리 중입니다. 완료되면 미리보기가 표시됩니다.
+                    {getDocumentProgressText(activeDoc) || '문서 처리 중입니다.'} 완료되면 미리보기가 표시됩니다.
                   </div>
                 )
               ) : (

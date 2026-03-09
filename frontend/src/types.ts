@@ -39,6 +39,9 @@ export interface DocumentItem {
   original_name: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   file_url: string;
+  total_pages?: number;
+  processed_pages?: number;
+  progress_label?: string;
   error_message?: string;
   created_at: string;
   updated_at: string;
