@@ -375,25 +375,6 @@ export function ChatView() {
                     className={`animate-fade-in-up group/image rounded-lg overflow-hidden ${referenceImageId === item.data.id ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}`}
                   >
                     {renderInputImagePreview(referenceInputUrls, attachmentInputUrls)}
-                    <div className="flex justify-end mb-2 items-start gap-2">
-                      <div className="max-w-[85%]">
-                        <div className="weav-glass-bubble rounded-xl px-4 py-2 border text-foreground border-primary/40 transition-colors duration-200">
-                          <p className="whitespace-pre-wrap text-sm">{item.data.prompt}</p>
-                        </div>
-                      </div>
-                      {currentSession && (
-                        <button
-                          type="button"
-                          onClick={() => setRegenerateImagePrompt(currentSession.id, item.data.prompt)}
-                          disabled={sending}
-                          className="p-1.5 rounded shrink-0 mt-1 bg-secondary/80 text-muted-foreground hover:bg-secondary hover:text-foreground border border-border disabled:opacity-50 transition-colors duration-200"
-                          title="하단 입력창에서 수정 후 재생성"
-                          aria-label="하단 입력창에서 수정 후 재생성"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                      )}
-                    </div>
                     <div className="flex justify-start">
                       <div className="max-w-[85%] relative group/img">
                         <button
@@ -403,7 +384,7 @@ export function ChatView() {
                         >
                           <img
                             src={item.data.image_url}
-                            alt={item.data.prompt}
+                            alt="generated"
                             className="w-full h-auto object-cover max-h-[480px] cursor-pointer min-h-[200px]"
                           />
                         </button>
@@ -488,13 +469,6 @@ export function ChatView() {
               {pendingImageRequest?.sessionId === currentSession.id && (
                 <div className="animate-fade-in-up">
                   {renderInputImagePreview(pendingImageRequest.referenceImageUrls, pendingImageRequest.attachmentImageUrls)}
-                  <div className="flex justify-end mb-2">
-                    <div className="max-w-[85%]">
-                      <div className="rounded-xl px-4 py-2 border bg-primary/18 text-foreground border-primary/40 transition-colors duration-200">
-                        <p className="whitespace-pre-wrap text-sm">{pendingImageRequest.prompt}</p>
-                      </div>
-                    </div>
-                  </div>
                   <div className="flex justify-start">
                     <div className="max-w-[85%]">
                       <div className="rounded-xl overflow-hidden bg-secondary/58 border border-border/65 backdrop-blur-sm flex items-center justify-center min-h-[200px] w-[280px] text-muted-foreground text-sm">

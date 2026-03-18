@@ -412,22 +412,6 @@ def task_image(
             if job.image_record is None:
                 raise AIError('No image URL in response (malformed fal response)')
 
-            # Leave a lightweight assistant message so follow-up text chat can reference
-            # the image generation context (single chat-room UX).
-            rec = job.image_record
-            summary = "\n".join(
-                line
-                for line in [
-                    f"이미지 생성 완료 (ID: {rec.id})",
-                    f"- 모델: {effective_model}",
-                    (f"- seed: {rec.seed}" if rec.seed is not None else ""),
-                    f"- 프롬프트: {_clip_text(prompt, 240)}",
-                    f"- 이미지 URL: {rec.image_url}",
-                ]
-                if line
-            )
-            Message.objects.create(session=job.session, role='assistant', content=summary, citations=[])
-
             job.status = 'success'
             job.error_message = ''
             job.save(update_fields=['image_record_id', 'status', 'error_message', 'updated_at'])
