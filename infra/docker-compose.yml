@@ -46,6 +46,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - FAL_KEY=${FAL_KEY}
+      # Optional: override fal endpoints (useful when fal.run DNS is blocked)
+      - FAL_BASE_URL=${FAL_BASE_URL:-}
+      - FAL_QUEUE_BASE_URL=${FAL_QUEUE_BASE_URL:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_BENCHMARK_VIDEO_MODEL=${GEMINI_BENCHMARK_VIDEO_MODEL:-}
@@ -85,6 +88,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - FAL_KEY=${FAL_KEY}
+      # Optional: override fal endpoints (useful when fal.run DNS is blocked)
+      - FAL_BASE_URL=${FAL_BASE_URL:-}
+      - FAL_QUEUE_BASE_URL=${FAL_QUEUE_BASE_URL:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_BENCHMARK_VIDEO_MODEL=${GEMINI_BENCHMARK_VIDEO_MODEL:-}
@@ -128,6 +134,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - FAL_KEY=${FAL_KEY}
+      # Optional: override fal endpoints (useful when fal.run DNS is blocked)
+      - FAL_BASE_URL=${FAL_BASE_URL:-}
+      - FAL_QUEUE_BASE_URL=${FAL_QUEUE_BASE_URL:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_BENCHMARK_VIDEO_MODEL=${GEMINI_BENCHMARK_VIDEO_MODEL:-}

@@ -17,8 +17,19 @@ import ipaddress
 import requests
 from .errors import FALError
 
-FAL_BASE = 'https://fal.run'
-FAL_QUEUE_BASE = 'https://queue.fal.run'
+def _env_url(name: str, default: str) -> str:
+    """Read URL from env and normalize (strip trailing slash)."""
+    raw = (os.environ.get(name) or "").strip()
+    url = raw or default
+    return url.rstrip("/")
+
+
+# Allow overriding for environments where fal.run is blocked/unresolvable.
+# Examples:
+# - FAL_BASE_URL=https://fal.run
+# - FAL_QUEUE_BASE_URL=https://queue.fal.run
+FAL_BASE = _env_url("FAL_BASE_URL", "https://fal.run")
+FAL_QUEUE_BASE = _env_url("FAL_QUEUE_BASE_URL", "https://queue.fal.run")
 # 채팅: openrouter/router (any-llm deprecated 대체)
 FAL_CHAT_ENDPOINT = 'openrouter/router'
 # Imagen 4 (Google): aspect_ratio "1:1"|"16:9"|"9:16"|"4:3"|"3:4", resolution "1K"|"2K", output_format png|jpeg|webp
@@ -86,10 +97,36 @@ def _extract_error_message(resp: requests.Response) -> str:
         return resp.text or resp.reason or f'HTTP {resp.status_code}'
 
 
+def _format_requests_exception(e: Exception, *, base_url: str, endpoint: str) -> str:
+    """
+    Convert low-level request errors into actionable, Korean-friendly messages.
+    Especially important for Docker DNS issues (NameResolutionError).
+    """
+    msg = str(e) if e else "unknown network error"
+    lower = msg.lower()
+    if "nameresolutionerror" in lower or "failed to resolve" in lower or "name or service not known" in lower:
+        return (
+            "fal API 도메인 DNS 해석에 실패했습니다. "
+            f"(요청: {base_url}/{endpoint})\n"
+            "- Docker/호스트 인터넷 연결, VPN/프록시, 회사 DNS 차단 여부를 확인해 주세요.\n"
+            "- Docker DNS가 꼬였으면 Docker 재시작 또는 DNS 설정(예: 1.1.1.1/8.8.8.8) 점검이 필요합니다.\n"
+            "- 필요하면 `FAL_BASE_URL`, `FAL_QUEUE_BASE_URL`로 fal 엔드포인트를 오버라이드할 수 있습니다."
+        )
+    if "timeout" in lower or "timed out" in lower:
+        return (
+            "fal API 요청이 타임아웃되었습니다. "
+            f"(요청: {base_url}/{endpoint}) 잠시 후 다시 시도해 주세요."
+        )
+    return f"fal API 요청 실패: {msg}"
+
+
 def _openrouter_queue_submit(payload: dict, timeout: int = 30) -> dict:
     url = f'{FAL_QUEUE_BASE}/{FAL_CHAT_ENDPOINT}'
     headers = {**_fal_auth_header(), 'Content-Type': 'application/json'}
-    r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    except requests.RequestException as e:
+        raise FALError(_format_requests_exception(e, base_url=FAL_QUEUE_BASE, endpoint=FAL_CHAT_ENDPOINT)) from e
     if not r.ok:
         msg = _extract_error_message(r)
         logger.warning("fal openrouter queue submit %s: status=%s body=%s", url, r.status_code, msg)
@@ -106,7 +143,10 @@ def _openrouter_queue_poll(request_id: str, timeout_sec: int = 120, poll_interva
     while True:
         if time.time() - start > max(1, timeout_sec):
             raise FALError('OpenRouter 응답 대기 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.')
-        r = requests.get(status_url, headers=headers, timeout=20)
+        try:
+            r = requests.get(status_url, headers=headers, timeout=20)
+        except requests.RequestException as e:
+            raise FALError(_format_requests_exception(e, base_url=FAL_QUEUE_BASE, endpoint=FAL_CHAT_ENDPOINT)) from e
         if not r.ok:
             msg = _extract_error_message(r)
             logger.warning("fal openrouter queue status %s: status=%s body=%s", status_url, r.status_code, msg)
@@ -132,7 +172,10 @@ def _openrouter_queue_poll(request_id: str, timeout_sec: int = 120, poll_interva
 def _openrouter_queue_result(request_id: str) -> dict:
     url = f'{FAL_QUEUE_BASE}/{FAL_CHAT_ENDPOINT}/requests/{request_id}'
     headers = _fal_auth_header()
-    r = requests.get(url, headers=headers, timeout=30)
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+    except requests.RequestException as e:
+        raise FALError(_format_requests_exception(e, base_url=FAL_QUEUE_BASE, endpoint=FAL_CHAT_ENDPOINT)) from e
     if not r.ok:
         msg = _extract_error_message(r)
         logger.warning("fal openrouter queue result %s: status=%s body=%s", url, r.status_code, msg)
@@ -143,7 +186,10 @@ def _openrouter_queue_result(request_id: str) -> dict:
 def _fal_queue_submit(endpoint: str, payload: dict, timeout: int = 30) -> dict:
     url = f'{FAL_QUEUE_BASE}/{endpoint}'
     headers = {**_fal_auth_header(), 'Content-Type': 'application/json'}
-    r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    except requests.RequestException as e:
+        raise FALError(_format_requests_exception(e, base_url=FAL_QUEUE_BASE, endpoint=endpoint)) from e
     if not r.ok:
         msg = _extract_error_message(r)
         logger.warning("fal queue submit %s: status=%s body=%s", url, r.status_code, msg)
@@ -161,7 +207,10 @@ def _fal_queue_poll(endpoint: str, request_id: str, timeout_sec: int = 120, poll
     while True:
         if time.time() - start > max(1, timeout_sec):
             raise FALError('fal 응답 대기 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.')
-        r = requests.get(status_url, headers=headers, timeout=20)
+        try:
+            r = requests.get(status_url, headers=headers, timeout=20)
+        except requests.RequestException as e:
+            raise FALError(_format_requests_exception(e, base_url=FAL_QUEUE_BASE, endpoint=endpoint)) from e
         if not r.ok:
             msg = _extract_error_message(r)
             logger.warning("fal queue status %s: status=%s body=%s", status_url, r.status_code, msg)
@@ -186,7 +235,10 @@ def _fal_queue_poll(endpoint: str, request_id: str, timeout_sec: int = 120, poll
 def _fal_queue_result(endpoint: str, request_id: str) -> dict:
     url = f'{FAL_QUEUE_BASE}/{endpoint}/requests/{request_id}'
     headers = _fal_auth_header()
-    r = requests.get(url, headers=headers, timeout=30)
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+    except requests.RequestException as e:
+        raise FALError(_format_requests_exception(e, base_url=FAL_QUEUE_BASE, endpoint=endpoint)) from e
     if not r.ok:
         msg = _extract_error_message(r)
         logger.warning("fal queue result %s: status=%s body=%s", url, r.status_code, msg)
@@ -666,7 +718,10 @@ def image_generation_fal(prompt: str, model: str = FAL_IMAGEN4, aspect_ratio: st
 
     if _fal_debug_enabled():
         logger.info("fal request: endpoint=%s payload=%s", endpoint, _sanitize_payload(payload))
-    r = requests.post(f'{FAL_BASE}/{endpoint}', headers=_fal_headers(), json=payload, timeout=180)
+    try:
+        r = requests.post(f'{FAL_BASE}/{endpoint}', headers=_fal_headers(), json=payload, timeout=180)
+    except requests.RequestException as e:
+        raise FALError(_format_requests_exception(e, base_url=FAL_BASE, endpoint=endpoint)) from e
     if not r.ok:
         try:
             err = r.json()
@@ -715,7 +770,10 @@ def remove_background_fal(image_url: str, crop_to_bbox: bool = False) -> dict:
     }
     if _fal_debug_enabled():
         logger.info("fal request: endpoint=%s payload=%s", FAL_IMAGEUTILS_REMBG, _sanitize_payload(payload))
-    r = requests.post(f'{FAL_BASE}/{FAL_IMAGEUTILS_REMBG}', headers=_fal_headers(), json=payload, timeout=180)
+    try:
+        r = requests.post(f'{FAL_BASE}/{FAL_IMAGEUTILS_REMBG}', headers=_fal_headers(), json=payload, timeout=180)
+    except requests.RequestException as e:
+        raise FALError(_format_requests_exception(e, base_url=FAL_BASE, endpoint=FAL_IMAGEUTILS_REMBG)) from e
     if not r.ok:
         msg = _extract_error_message(r)
         if _fal_debug_enabled():
@@ -901,7 +959,10 @@ def tts_elevenlabs(
     if next_text and next_text.strip():
         payload['next_text'] = _normalize_korean_for_tts(next_text.strip()[:1200])
 
-    r = requests.post(f'{FAL_BASE}/{FAL_TTS_ELEVENLABS_TURBO_V25}', headers=_fal_headers(), json=payload, timeout=120)
+    try:
+        r = requests.post(f'{FAL_BASE}/{FAL_TTS_ELEVENLABS_TURBO_V25}', headers=_fal_headers(), json=payload, timeout=120)
+    except requests.RequestException as e:
+        raise FALError(_format_requests_exception(e, base_url=FAL_BASE, endpoint=FAL_TTS_ELEVENLABS_TURBO_V25)) from e
     r.raise_for_status()
     data = r.json()
     audio = data.get('audio') or {}
@@ -915,7 +976,10 @@ def tts_elevenlabs(
         error_msg = data.get('error') or data.get('detail') or 'No audio URL'
         if (voice or '').strip() and voice != 'Jessica':
             fallback_payload = {**payload, 'voice': 'Jessica'}
-            r2 = requests.post(f'{FAL_BASE}/{FAL_TTS_ELEVENLABS_TURBO_V25}', headers=_fal_headers(), json=fallback_payload, timeout=120)
+            try:
+                r2 = requests.post(f'{FAL_BASE}/{FAL_TTS_ELEVENLABS_TURBO_V25}', headers=_fal_headers(), json=fallback_payload, timeout=120)
+            except requests.RequestException as e:
+                raise FALError(_format_requests_exception(e, base_url=FAL_BASE, endpoint=FAL_TTS_ELEVENLABS_TURBO_V25)) from e
             r2.raise_for_status()
             data2 = r2.json()
             audio2 = data2.get('audio') or {}
@@ -994,7 +1058,7 @@ def ffmpeg_compose_video(
             timeout=300,
         )
     except requests.RequestException as e:
-        raise FALError(f'fal compose request failed: {e}') from e
+        raise FALError(_format_requests_exception(e, base_url=FAL_BASE, endpoint=FAL_FFMPEG_COMPOSE)) from e
 
     if r.status_code == 422:
         try:
